@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Exchange Rates - Networa{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Exchange Rates</h1>
+</div>
+
+{% if success %}
+<script>document.addEventListener('DOMContentLoaded', function() { showToast({{ success | tojson }}); });</script>
+{% endif %}
+
+<!-- Add / Update Rate -->
+<div class="card" style="margin-bottom: 24px; max-width: 560px">
+    <h3 style="font-size: 13px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px;">Set Rate</h3>
+    <form method="post" action="/exchange-rates">
+        <div class="form-row">
+            <div class="form-group">
+                <label>From Currency</label>
+                <select name="from_currency">
+                    <option value="EUR">EUR</option>
+                    <option value="UAH">UAH</option>
+                    <option value="GBP">GBP</option>
+                    <option value="CHF">CHF</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>To Currency</label>
+                <input type="text" name="to_currency" value="USD" readonly style="opacity:0.6">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Rate (1 unit → USD)</label>
+                <input type="number" name="rate" step="0.000001" placeholder="e.g. 1.0834" required>
+            </div>
+            <div class="form-group">
+                <label>Effective Date</label>
+                <input type="date" name="rate_date" value="{{ today }}" required>
+            </div>
+        </div>
+        <div style="display:flex; gap:12px; align-items:center; margin-top:4px">
+            <button type="submit" class="btn btn-primary">Save Rate</button>
+            <button type="submit" form="recalc-form" class="btn btn-secondary">
+                Recalculate All Asset Values
+            </button>
+            <button type="submit" form="nbu-form" class="btn btn-secondary">
+                Fetch from NBU
+            </button>
+        </div>
+    </form>
+    <form id="recalc-form" method="post" action="/exchange-rates/recalculate"></form>
+    <form id="nbu-form" method="post" action="/exchange-rates/fetch-nbu"></form>
+</div>
+
+<!-- Existing Rates -->
+<div class="card">
+    <h3 style="font-size: 13px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px;">Rate History</h3>
+    {% if rates %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>From</th>
+                    <th>To</th>
+                    <th class="text-right">Rate</th>
+                    <th class="text-right">Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for rate in rates %}
+                <tr>
+                    <td class="mono">{{ rate.from_currency }}</td>
+                    <td class="mono">{{ rate.to_currency }}</td>
+                    <td class="text-right mono">{{ "%.6f" | format(rate.rate) }}</td>
+                    <td class="text-right text-muted">{{ rate.rate_date }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--text-secondary); font-size: 14px;">No rates saved yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

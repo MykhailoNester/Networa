@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow - Networa{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Cash Flow</h1>
+    <button class="btn btn-primary" onclick="document.getElementById('addCfModal').style.display='flex'">+ Add</button>
+</div>
+
+<!-- Filters -->
+<div class="card" style="margin-bottom: 16px; padding: 14px 20px;">
+    <form method="get" action="/cashflows" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap">
+        <div class="form-group" style="margin:0; flex:1; min-width:140px">
+            <label>From</label>
+            <input type="date" name="from_date" value="{{ from_date }}">
+        </div>
+        <div class="form-group" style="margin:0; flex:1; min-width:140px">
+            <label>To</label>
+            <input type="date" name="to_date" value="{{ to_date }}">
+        </div>
+        <div style="display:flex; gap:8px">
+            <button type="submit" class="btn btn-primary btn-sm">Filter</button>
+            {% if from_date or to_date %}
+            <a href="/cashflows" class="btn btn-secondary btn-sm">Clear</a>
+            {% endif %}
+        </div>
+    </form>
+</div>
+
+<!-- Summary -->
+<div class="cards-row" style="grid-template-columns: repeat(3, 1fr); margin-bottom:16px">
+    <div class="card stat-card">
+        <div class="label">Total In</div>
+        <div class="value text-positive">{{ total_in | format_currency }}</div>
+    </div>
+    <div class="card stat-card">
+        <div class="label">Total Out</div>
+        <div class="value text-negative">{{ total_out | format_currency }}</div>
+    </div>
+    <div class="card stat-card">
+        <div class="label">Net Flow</div>
+        <div class="value {% if total_in - total_out >= 0 %}text-positive{% else %}text-negative{% endif %}">
+            {{ (total_in - total_out) | format_currency }}
+        </div>
+    </div>
+</div>
+
+{% if request.query_params.get('saved') %}
+<div style="background: rgba(16,185,129,0.12); color: #10b981; padding: 10px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+    Cash flow entry saved.
+</div>
+{% endif %}
+{% if request.query_params.get('deleted') %}
+<div style="background: rgba(239,68,68,0.1); color: #ef4444; padding: 10px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+    Entry deleted.
+</div>
+{% endif %}
+
+{% if cashflows %}
+<div class="card">
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Asset</th>
+                    <th>Symbol</th>
+                    <th>Description</th>
+                    <th>Notes</th>
+                    <th class="text-right">Cash In (USD)</th>
+                    <th class="text-right">Cash Out (USD)</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cf in cashflows %}
+                <tr id="cf-row-{{ cf.id }}">
+                    <td class="mono">{{ cf.flow_date }}</td>
+                    <td>{{ cf.asset_name or '' }}</td>
+                    <td class="mono text-muted">{{ cf.symbol or '' }}</td>
+                    <td class="text-muted" style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ cf.description or '' }}</td>
+                    <td class="text-muted" style="max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ cf.notes or '' }}</td>
+                    <td class="text-right mono text-positive">{% if cf.cash_in_usd > 0 %}{{ cf.cash_in_usd | format_currency(decimals=2) }}{% endif %}</td>
+                    <td class="text-right mono text-negative">{% if cf.cash_out_usd > 0 %}{{ cf.cash_out_usd | format_currency(decimals=2) }}{% endif %}</td>
+                    <td><span class="text-muted" style="font-size:12px">{{ cf.status }}</span></td>
+                    <td>
+                        <div style="display:flex; gap:4px">
+                            <button class="btn btn-sm btn-secondary"
+                                    hx-get="/cashflows/{{ cf.id }}/edit-form"
+                                    hx-target="#cf-row-{{ cf.id }}"
+                                    hx-swap="outerHTML">Edit</button>
+                            <button class="btn btn-sm btn-danger"
+                                    hx-post="/cashflows/{{ cf.id }}/delete"
+                                    hx-confirm="Delete this cash flow entry?"
+                                    hx-target="#cf-row-{{ cf.id }}"
+                                    hx-swap="outerHTML">Del</button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div style="padding-top:12px; font-size:12px; color:var(--text-muted)">{{ cashflows | length }} entries</div>
+</div>
+{% else %}
+<div class="card empty-state">
+    <h3>No cash flow entries</h3>
+    {% if from_date or to_date %}
+    <p>No entries found for the selected date range.</p>
+    <a href="/cashflows" class="btn btn-secondary" style="margin-top:16px">Clear Filters</a>
+    {% else %}
+    <p>Add your first cash flow entry or import a CSV.</p>
+    <div style="display:flex; gap:8px; justify-content:center; margin-top:16px">
+        <button class="btn btn-primary" onclick="document.getElementById('addCfModal').style.display='flex'">+ Add Entry</button>
+        <a href="/import" class="btn btn-secondary">Import CSV</a>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if sold_positions %}
+<!-- Realized P&L -->
+<div class="card" style="margin-top:24px">
+    <h3 class="section-label">Realized P&amp;L — Sold Positions</h3>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th class="text-right">Cash In</th>
+                    <th class="text-right">Cash Out</th>
+                    <th class="text-right">Realized P&amp;L</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pos in sold_positions %}
+                <tr>
+                    <td>{{ pos.name }}</td>
+                    <td class="text-right mono">{{ pos.cash_in | format_currency(decimals=2) }}</td>
+                    <td class="text-right mono">{{ pos.cash_out | format_currency(decimals=2) }}</td>
+                    <td class="text-right mono {% if pos.realized_pnl >= 0 %}text-positive{% else %}text-negative{% endif %}">
+                        {% if pos.realized_pnl >= 0 %}+{% endif %}{{ pos.realized_pnl | format_currency(decimals=2) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                {% set total_pnl = sold_positions | sum(attribute='realized_pnl') %}
+                <tr style="font-weight:600; border-top: 1px solid var(--border-color);">
+                    <td>Total</td>
+                    <td class="text-right mono">{{ sold_positions | sum(attribute='cash_in') | format_currency(decimals=2) }}</td>
+                    <td class="text-right mono">{{ sold_positions | sum(attribute='cash_out') | format_currency(decimals=2) }}</td>
+                    <td class="text-right mono {% if total_pnl >= 0 %}text-positive{% else %}text-negative{% endif %}">
+                        {% if total_pnl >= 0 %}+{% endif %}{{ total_pnl | format_currency(decimals=2) }}
+                    </td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Add Cash Flow Modal -->
+<div id="addCfModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center;">
+    <div class="card" style="width:520px; max-height:88vh; overflow-y:auto;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+            <h2 style="font-size:18px">Add Cash Flow</h2>
+            <button class="btn btn-sm" onclick="document.getElementById('addCfModal').style.display='none'">&times;</button>
+        </div>
+        <form action="/cashflows/create" method="post">
+            <div class="form-group">
+                <label>Asset <span class="text-muted">(optional)</span></label>
+                <select name="asset_id">
+                    <option value="">-- No Asset --</option>
+                    {% for a in assets %}
+                    <option value="{{ a.id }}">{{ a.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Flow Date</label>
+                    <input type="date" name="flow_date" value="{{ 'today' | default('') }}" id="cf-flow-date" required>
+                </div>
+                <div class="form-group">
+                    <label>Status</label>
+                    <select name="status">
+                        <option value="Active">Active</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Completed">Completed</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Description <span class="text-muted">(optional)</span></label>
+                <input type="text" name="description" placeholder="e.g. Buy VTI, Dividend">
+            </div>
+            <div class="form-group">
+                <label>Notes <span class="text-muted">(optional)</span></label>
+                <input type="text" name="notes" placeholder="Additional notes">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Cash In</label>
+                    <input type="number" name="cash_in" step="0.01" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="cash_in_currency">
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="UAH">UAH</option>
+                        <option value="GBP">GBP</option>
+                        <option value="CHF">CHF</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Cash Out</label>
+                    <input type="number" name="cash_out" step="0.01" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="cash_out_currency">
+                        <option value="USD">USD</option>
+                        <option value="EUR">EUR</option>
+                        <option value="UAH">UAH</option>
+                        <option value="GBP">GBP</option>
+                        <option value="CHF">CHF</option>
+                    </select>
+                </div>
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px">
+                <button type="button" class="btn btn-secondary"
+                        onclick="document.getElementById('addCfModal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Default flow date to today
+document.addEventListener('DOMContentLoaded', function () {
+    var d = document.getElementById('cf-flow-date');
+    if (d && !d.value) {
+        d.value = new Date().toISOString().slice(0, 10);
+    }
+    // Close modal on backdrop click
+    document.getElementById('addCfModal').addEventListener('click', function(e) {
+        if (e.target === this) this.style.display = 'none';
+    });
+});
+</script>
+{% endblock %}

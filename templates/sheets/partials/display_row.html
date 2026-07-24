@@ -1,0 +1,18 @@
+<tr id="sheet-row-{{ sheet.id }}">
+    <td>{{ sheet.name }}</td>
+    <td class="mono">{{ sheet.sort_order }}</td>
+    <td>{{ sheet.asset_count }}</td>
+    <td>
+        <div style="display:flex; gap:4px">
+            <button class="btn btn-sm btn-secondary"
+                    hx-get="/sheets/{{ sheet.id }}/edit-form"
+                    hx-target="#sheet-row-{{ sheet.id }}"
+                    hx-swap="outerHTML">Edit</button>
+            <button class="btn btn-sm btn-danger"
+                    hx-post="/sheets/{{ sheet.id }}/delete"
+                    hx-confirm="Delete this sheet?"
+                    hx-target="body"
+                    hx-push-url="true">Del</button>
+        </div>
+    </td>
+</tr>

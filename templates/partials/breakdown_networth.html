@@ -1,0 +1,13 @@
+{% for asset in top_assets %}
+<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
+    <span style="font-size:12px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58%; display:block">{{ asset.name }}</span>
+    <div style="text-align:right; flex-shrink:0">
+        <span class="mono" style="font-size:12px; color:var(--text-primary)">{{ asset.current_value_usd | format_display }}</span>
+        {% if total > 0 %}
+        <span style="font-size:10px; color:var(--text-muted); margin-left:5px">{{ "{:.1f}".format(asset.current_value_usd / total * 100) }}%</span>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<span style="font-size:12px; color:var(--text-muted)">No assets</span>
+{% endfor %}

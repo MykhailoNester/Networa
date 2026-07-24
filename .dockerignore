@@ -1,0 +1,37 @@
+# Keep the build context small and free of secrets / personal data.
+# The Dockerfile does `COPY . .`, so anything not excluded here is baked
+# into the image — never let real data or credentials in.
+
+# VCS / tooling
+.git
+.gitignore
+.dockerignore
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Secrets / env
+.env
+.mcp.json
+
+# Databases & personal/financial data (app creates its DB at runtime under /app/data)
+data/
+cashflow/
+reference/
+
+# Internal / editor / OS
+team/
+.claude/
+.idea/
+.vscode/
+docs/
+.DS_Store

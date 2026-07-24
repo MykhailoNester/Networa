@@ -1,0 +1,20 @@
+{% set type_labels = {'investable': 'Investable', 'investable_cash': 'Cash', 'investable_easy_convert': 'Easy Convert'} %}
+{% set type_colors = {'investable': '#00c853', 'investable_cash': '#00bfa5', 'investable_easy_convert': '#69f0ae'} %}
+{% for key, amount in investable_by_type.items() %}
+{% set label = type_labels.get(key, key | replace('_', ' ') | title) %}
+{% set color = type_colors.get(key, '#00c853') %}
+<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
+    <div style="display:flex; align-items:center; gap:6px">
+        <span style="width:7px; height:7px; border-radius:50%; background:{{ color }}; flex-shrink:0"></span>
+        <span style="font-size:12px; color:var(--text-secondary)">{{ label }}</span>
+    </div>
+    <div style="text-align:right; flex-shrink:0">
+        <span class="mono" style="font-size:12px; color:var(--text-primary)">{{ amount | format_display }}</span>
+        {% if total_assets > 0 %}
+        <span style="font-size:10px; color:var(--text-muted); margin-left:5px">{{ "{:.1f}".format(amount / total_assets * 100) }}%</span>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<span style="font-size:12px; color:var(--text-muted)">No investable assets</span>
+{% endfor %}

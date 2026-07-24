@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Import - Networa{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Import Data</h1>
+</div>
+
+{% if result %}
+<div class="alert {% if result.success %}alert-success{% else %}alert-error{% endif %}">
+    {% if result.success %}
+        <strong>{{ result.type }} imported successfully!</strong><br>
+        {% if result.assets_created is defined %}Assets created: {{ result.assets_created }}{% endif %}
+        {% if result.sheets_created is defined %} | Sheets created: {{ result.sheets_created }}{% endif %}
+        {% if result.entries_created is defined %}Entries created: {{ result.entries_created }}{% endif %}
+        {% if result.skipped is defined %} | Skipped: {{ result.skipped }}{% endif %}
+    {% else %}
+        <strong>Import failed:</strong> {{ result.error }}
+    {% endif %}
+</div>
+{% endif %}
+
+<p class="text-muted" style="font-size: 13px; margin-bottom: 20px;">
+    Import your portfolio from plain CSV files. See
+    <code>docs/import-format.md</code> for the full column reference. Import the
+    Assets CSV first (creates assets and sheets), then the Cashflows CSV so
+    entries can be linked to existing assets by name.
+</p>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+    <!-- Assets CSV Import -->
+    <div class="card">
+        <h3 style="font-size: 16px; margin-bottom: 4px;">Assets CSV</h3>
+        <p class="text-muted" style="font-size: 13px; margin-bottom: 16px;">Import assets and debts. Values in any currency are converted to USD. Sheets are auto-created when new.</p>
+        <form action="/import/assets-csv" method="post" enctype="multipart/form-data">
+            <div class="upload-zone" onclick="this.querySelector('input').click()">
+                <input type="file" name="file" accept=".csv" required onchange="this.closest('.upload-zone').querySelector('.upload-label').textContent = this.files[0].name">
+                <div class="upload-label">Click to select CSV file</div>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Import Assets</button>
+        </form>
+        <p class="text-muted" style="font-size: 12px; margin-top: 12px;">
+            <strong>Columns:</strong>
+            <code>name</code> (required),
+            <code>asset_class</code> (required: real_estate, precious_metal, cash, stock, fund, crypto, vehicle, investment, miscellaneous),
+            <code>value</code> (required, number),
+            <code>currency</code> (ISO 4217, default USD),
+            <code>category</code> (asset|debt, default asset),
+            <code>sheet</code>, <code>section</code>, <code>ticker</code>,
+            <code>quantity</code>, <code>price</code>,
+            <code>cost_basis</code>, <code>cost_basis_currency</code>,
+            <code>notes</code>.
+        </p>
+    </div>
+
+    <!-- Cashflows CSV Import -->
+    <div class="card">
+        <h3 style="font-size: 16px; margin-bottom: 4px;">Cashflows CSV</h3>
+        <p class="text-muted" style="font-size: 13px; margin-bottom: 16px;">Import transaction history. Entries are linked to existing assets by name.</p>
+        <form action="/import/cashflow-csv" method="post" enctype="multipart/form-data">
+            <div class="upload-zone" onclick="this.querySelector('input').click()">
+                <input type="file" name="file" accept=".csv" required onchange="this.closest('.upload-zone').querySelector('.upload-label').textContent = this.files[0].name">
+                <div class="upload-label">Click to select CSV file</div>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Import Cashflows</button>
+        </form>
+        <p class="text-muted" style="font-size: 12px; margin-top: 12px;">
+            <strong>Columns:</strong>
+            <code>date</code> (required, YYYY-MM-DD),
+            <code>asset</code> (matched by name),
+            <code>cash_in</code> / <code>cash_out</code> (bare number or "USD 65.25"),
+            <code>currency</code> (default USD),
+            <code>description</code>, <code>notes</code>,
+            <code>status</code> (default Active).
+        </p>
+    </div>
+</div>
+
+<div style="margin-top: 24px;">
+    <p class="text-muted" style="font-size: 13px;">
+        <strong>Import order:</strong> Import the Assets CSV first (creates assets and sheets), then import the Cashflows CSV (links entries to existing assets by name).
+    </p>
+</div>
+{% endblock %}

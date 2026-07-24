@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+{% block title %}Assets - Networa{% endblock %}
+
+{% block content %}
+<!-- Page Header -->
+<div class="page-header" style="margin-bottom: 20px;">
+    <h1>Assets</h1>
+</div>
+
+<!-- Sheet Summary Bar -->
+{% if sheets_with_totals %}
+<div style="display:flex; gap:32px; align-items:flex-start; margin-bottom:24px; padding-bottom:16px; border-bottom:1px solid var(--border); overflow-x:auto; flex-wrap:nowrap">
+    {% for sheet in sheets_with_totals %}
+    <div class="sheet-tab" style="flex-shrink:0; display:flex; align-items:flex-start; gap:4px;">
+        <a href="/assets?sheet_id={{ sheet.id }}" style="text-decoration:none; display:flex; flex-direction:column; gap:3px;">
+            <span style="font-size:14px; font-weight:{% if active_sheet_id == sheet.id %}600{% else %}400{% endif %}; color:{% if active_sheet_id == sheet.id %}var(--text-primary){% else %}var(--text-secondary){% endif %}; white-space:nowrap">
+                {{ sheet.name }}
+            </span>
+            <span class="mono" style="font-size:13px; color:{% if active_sheet_id == sheet.id %}var(--text-primary){% else %}var(--text-muted){% endif %}">
+                {{ sheet.total | format_display }}
+            </span>
+        </a>
+        <button class="sheet-delete-btn" onclick="deleteSection({{ sheet.id }}, '{{ sheet.name }}')"
+                title="Remove section" style="visibility:hidden; background:none; border:none; cursor:pointer; color:var(--text-muted); font-size:13px; padding:0; line-height:1; margin-top:1px;">
+            &times;
+        </button>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Assets Table -->
+<div class="card" style="padding:0; overflow:hidden;">
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Asset</th>
+                    <th class="text-right" style="min-width:180px">In / Out / Cost</th>
+                    <th class="text-right" style="width:76px">IRR</th>
+                    <th class="text-right" style="width:160px">Value</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if assets %}
+                {% for asset in assets %}
+                <tr>
+                    <td style="cursor:pointer" onclick="location.href='/assets/{{ asset.id }}'">
+                        <div style="font-size:14px; font-weight:500; color:var(--text-primary)">{{ asset.name }}</div>
+                        {% if asset.description %}
+                        <div class="text-muted" style="font-size:12px; margin-top:1px">{{ asset.description }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="text-right" style="font-size:13px; color:var(--text-secondary); cursor:pointer"
+                        onclick="location.href='/assets/{{ asset.id }}'">
+                        {% if asset.cash_in %}In&nbsp;<span class="mono">{{ asset.cash_in | format_currency }}</span>{% endif %}
+                        {% if asset.cash_out %}&nbsp;Out&nbsp;<span class="mono">{{ asset.cash_out | format_currency }}</span>{% endif %}
+                        {% if not asset.cash_in and asset.cost_basis %}Cost&nbsp;<span class="mono">{{ asset.cost_basis | format_currency }}</span>{% endif %}
+                    </td>
+                    <td class="text-right mono {% if asset.gain_loss_pct is not none and asset.gain_loss_pct > 0 %}text-positive{% elif asset.gain_loss_pct is not none and asset.gain_loss_pct < 0 %}text-negative{% endif %}"
+                        style="cursor:pointer" onclick="location.href='/assets/{{ asset.id }}'">
+                        {% if asset.gain_loss_pct is not none %}{{ "{:+.0f}".format(asset.gain_loss_pct) }}%{% endif %}
+                    </td>
+                    <td id="value-cell-{{ asset.id }}" class="text-right"
+                        hx-get="/assets/{{ asset.id }}/inline-edit"
+                        hx-target="#value-cell-{{ asset.id }}" hx-swap="outerHTML"
+                        style="cursor:pointer" title="Click to edit value">
+                        <div class="mono" style="font-size:15px; font-weight:600">
+                            {% if asset.currency != 'USD' %}
+                            {{ asset.value | format_currency(asset.currency) }}
+                            {% if asset.currency != display_currency %}
+                            <div class="text-muted" style="font-size:11px">{{ asset.current_value_usd | format_display }} {{ display_currency }}</div>
+                            {% endif %}
+                        {% else %}
+                            {{ asset.current_value_usd | format_display }}
+                        {% endif %}
+                        </div>
+                        {% if asset.ticker %}
+                        <div class="text-muted" style="font-size:11px; margin-top:2px">
+                            {{ asset.ticker }}{% if asset.quantity %}&nbsp;{{ "{:,.0f}".format(asset.quantity) }}{% endif %}
+                        </div>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+                <!-- Footer totals + add button -->
+                <tr style="background:var(--bg-secondary);">
+                    <td>
+                        <button class="btn" style="color:var(--text-secondary); background:none; border:none; padding:4px 0; cursor:pointer; font-size:13px; font-weight:500; letter-spacing:0.2px"
+                                onclick="document.getElementById('addModal').style.display='flex'">
+                            + ADD ASSET
+                        </button>
+                    </td>
+                    <td class="text-right" style="font-size:13px; color:var(--text-secondary)">
+                        {% if total_in %}In&nbsp;<span class="mono">{{ total_in | format_currency }}</span>{% endif %}
+                        {% if total_out %}&nbsp;Out&nbsp;<span class="mono">{{ total_out | format_currency }}</span>{% endif %}
+                    </td>
+                    <td></td>
+                    <td class="text-right mono" style="font-size:15px; font-weight:700; color:var(--text-primary)">
+                        {{ total_value | format_display }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" style="text-align:center; padding:48px 20px; color:var(--text-secondary)">
+                        No assets in this view.
+                        <button class="btn btn-primary btn-sm" style="margin-left:12px"
+                                onclick="document.getElementById('addModal').style.display='flex'">+ Add Asset</button>
+                    </td>
+                </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- New Section link -->
+<div style="padding:14px 4px 0;">
+    <button class="btn" style="color:var(--text-muted); background:none; border:none; padding:0; cursor:pointer; font-size:13px; font-weight:500; letter-spacing:0.2px"
+            onclick="document.getElementById('addSectionModal').style.display='flex'">
+        + NEW SECTION
+    </button>
+</div>
+
+<!-- Add Section Modal -->
+<div id="addSectionModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center;">
+    <div class="card" style="width:360px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h2 style="font-size:18px;">New Section</h2>
+            <button class="btn btn-sm" onclick="document.getElementById('addSectionModal').style.display='none'">&times;</button>
+        </div>
+        <div class="form-group">
+            <label>Section Name</label>
+            <input type="text" id="sectionNameInput" placeholder="e.g. Retirement, Real Estate" autofocus>
+        </div>
+        <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:8px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('addSectionModal').style.display='none'">Cancel</button>
+            <button class="btn btn-primary" onclick="createSection()">Create</button>
+        </div>
+    </div>
+</div>
+
+<!-- Add Asset Modal -->
+<div id="addModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center;">
+    <div class="card" style="width: 540px; max-height: 85vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 style="font-size: 18px;">Add Asset</h2>
+            <button class="btn btn-sm" onclick="document.getElementById('addModal').style.display='none'">&times;</button>
+        </div>
+        <form action="/assets/create" method="post">
+            <input type="hidden" name="category" value="asset">
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" name="name" required placeholder="e.g. Gold, Apartment, VTI">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Asset Class</label>
+                    <select name="asset_class" id="addAssetClass" onchange="onAssetClassChange(this)">
+                        {% for cls in asset_classes %}
+                        <option value="{{ cls.name }}">{{ cls.display_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Sheet</label>
+                    <select name="sheet_id">
+                        <option value="">-- None --</option>
+                        {% for sheet in sheets %}
+                        <option value="{{ sheet.id }}" {% if active_sheet_id == sheet.id %}selected{% endif %}>{{ sheet.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Value</label>
+                    <input type="number" name="value" step="0.01" value="0">
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="currency">
+                        {% for cur in ['USD', 'EUR', 'UAH', 'GBP', 'CHF'] %}
+                        <option value="{{ cur }}">{{ cur }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <!-- Market asset fields: ticker + quantity -->
+            <div class="form-row" id="addTickerRow">
+                <div class="form-group">
+                    <label>Ticker Symbol</label>
+                    <input type="text" name="ticker" placeholder="e.g. VTI, BTC-USD">
+                </div>
+                <div class="form-group">
+                    <label>Quantity</label>
+                    <input type="number" name="quantity" step="0.0001" placeholder="0">
+                </div>
+            </div>
+            <!-- Cost-basis asset fields: cost basis + purchase date -->
+            <div class="form-row" id="addCostBasisRow" style="display:none">
+                <div class="form-group">
+                    <label>Cost Basis (USD)</label>
+                    <input type="number" name="cost_basis" step="0.01" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label>Purchase Date <span class="text-muted">(optional)</span></label>
+                    <input type="date" name="purchase_date">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Investable</label>
+                    <select name="investable">
+                        <option value="non_investable">Non Investable</option>
+                        <option value="investable_cash">Investable - Cash</option>
+                        <option value="investable">Investable - Easy to convert</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Description <span class="text-muted">(optional)</span></label>
+                <input type="text" name="description" placeholder="Short description">
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px;">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('addModal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Asset</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.sheet-tab:hover .sheet-delete-btn { visibility:visible !important; }
+</style>
+<script>
+// Asset classes that use cost basis (no ticker/quantity)
+var COST_BASIS_CLASSES = ['cash', 'real_estate', 'vehicle'];
+
+function onAssetClassChange(sel) {
+    var isCostBasis = COST_BASIS_CLASSES.indexOf(sel.value) !== -1;
+    document.getElementById('addTickerRow').style.display = isCostBasis ? 'none' : '';
+    document.getElementById('addCostBasisRow').style.display = isCostBasis ? '' : 'none';
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('addModal').addEventListener('click', function(e) {
+        if (e.target === this) this.style.display = 'none';
+    });
+    document.getElementById('addSectionModal').addEventListener('click', function(e) {
+        if (e.target === this) this.style.display = 'none';
+    });
+    document.getElementById('sectionNameInput').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') createSection();
+    });
+    // Init modal fields for default selection
+    onAssetClassChange(document.getElementById('addAssetClass'));
+});
+
+function deleteSection(id, name) {
+    if (!confirm('Remove section "' + name + '"?\nAssets must be moved or deleted first.')) return;
+    fetch('/api/v1/sheets/' + id, {method: 'DELETE'})
+        .then(function(r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
+        .then(function() {
+            location.href = '/assets';
+        })
+        .catch(function() {
+            showToast('Cannot remove: move or delete all assets in "' + name + '" first.', 'error');
+        });
+}
+
+function createSection() {
+    const name = document.getElementById('sectionNameInput').value.trim();
+    if (!name) return;
+    fetch('/api/v1/sheets', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name: name, sort_order: 0}),
+    })
+    .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    })
+    .then(function(sheet) {
+        location.href = '/assets?sheet_id=' + sheet.id;
+    })
+    .catch(function(e) {
+        showToast('Failed to create section: ' + e.message, 'error');
+    });
+}
+</script>
+{% endblock %}

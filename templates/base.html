@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Networa{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="/static/vendor/htmx.min.js" defer></script>
+    <script src="/static/vendor/chart.min.js" defer></script>
+</head>
+<body>
+    <!-- Mobile Top Bar -->
+    <div class="mobile-topbar">
+        <div class="mobile-logo"><span>N</span>etwora</div>
+        <button class="hamburger" id="hamburger" aria-label="Toggle navigation">
+            <span></span><span></span><span></span>
+        </button>
+    </div>
+
+    <!-- Sidebar Overlay -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+    <div class="layout">
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-logo">
+                <span>N</span>etwora
+            </div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="/" class="{% if page == 'dashboard' %}active{% endif %}">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+                        Dashboard
+                    </a>
+                </li>
+                <li>
+                    <a href="/assets" class="{% if page == 'assets' %}active{% endif %}">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+                        Assets
+                    </a>
+                </li>
+                <li>
+                    <a href="/cashflows" class="{% if page == 'cashflows' %}active{% endif %}">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                        Cash Flow
+                    </a>
+                </li>
+                <li>
+                    <a href="/sheets" class="{% if page == 'sheets' %}active{% endif %}">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/>
+                            <line x1="9" y1="21" x2="9" y2="9"/>
+                        </svg>
+                        Sheets
+                    </a>
+                </li>
+                <li>
+                    <a href="/import" class="{% if page == 'import' %}active{% endif %}">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        Import
+                    </a>
+                </li>
+                <li>
+                    <a href="/exchange-rates" class="{% if page == 'exchange_rates' %}active{% endif %}">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                        Exchange Rates
+                    </a>
+                </li>
+            </ul>
+
+            <!-- Display currency selector -->
+            <form method="post" action="/settings/display-currency" style="padding: 0 8px; margin-top: 16px;">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px;">Display currency</div>
+                <div style="display: flex; gap: 4px;">
+                    {% for cur in ['USD', 'EUR', 'UAH'] %}
+                    <button type="submit" name="currency" value="{{ cur }}"
+                            style="flex: 1; padding: 5px 0; font-size: 11px; font-weight: 600; border-radius: 4px; border: 1px solid var(--border); cursor: pointer; transition: background 0.15s;
+                                   background: {% if display_currency == cur %}var(--accent){% else %}var(--bg-secondary){% endif %};
+                                   color: {% if display_currency == cur %}#fff{% else %}var(--text-secondary){% endif %};">
+                        {{ cur }}
+                    </button>
+                    {% endfor %}
+                </div>
+            </form>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    {% block scripts %}{% endblock %}
+
+    <!-- Mobile sidebar toggle -->
+    <script>
+    (function() {
+        const ham = document.getElementById('hamburger');
+        const sidebar = document.getElementById('sidebar');
+        const overlay = document.getElementById('sidebar-overlay');
+        function open() { sidebar.classList.add('open'); overlay.classList.add('open'); }
+        function close() { sidebar.classList.remove('open'); overlay.classList.remove('open'); }
+        ham.addEventListener('click', function() {
+            sidebar.classList.contains('open') ? close() : open();
+        });
+        overlay.addEventListener('click', close);
+        // Close on nav link click (mobile UX)
+        sidebar.querySelectorAll('a').forEach(function(a) {
+            a.addEventListener('click', close);
+        });
+    })();
+    </script>
+
+    <!-- Toast system -->
+    <div id="toast-container" style="position:fixed; bottom:24px; right:24px; z-index:1000; display:flex; flex-direction:column; gap:8px"></div>
+    <script>
+    function showToast(msg, type) {
+        const t = document.createElement('div');
+        t.className = 'toast toast-' + (type || 'success');
+        t.textContent = msg;
+        document.getElementById('toast-container').appendChild(t);
+        setTimeout(() => t.classList.add('toast-show'), 10);
+        setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3000);
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+        const p = new URLSearchParams(location.search);
+        if (p.get('saved')) showToast('Changes saved.');
+        if (p.get('recalculated')) showToast('Asset values recalculated.');
+        if (p.get('fetched')) showToast('Exchange rates updated from NBU.');
+        document.addEventListener('htmx:afterRequest', function(e) {
+            if (e.detail.successful && ['POST','PUT','PATCH'].includes(e.detail.requestConfig?.verb?.toUpperCase())) {
+                showToast('Saved.');
+            }
+        });
+    });
+    </script>
+</body>
+</html>

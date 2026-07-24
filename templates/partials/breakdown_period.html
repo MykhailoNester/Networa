@@ -1,0 +1,29 @@
+{% if change is not none %}
+<div style="margin-bottom:20px; padding-bottom:16px; border-bottom:1px solid var(--border)">
+    <div class="mono" style="font-size:28px; font-weight:700; color:{% if change >= 0 %}var(--positive){% else %}var(--negative){% endif %}">
+        {% if change >= 0 %}+{% endif %}{{ change | format_display }}
+    </div>
+    {% if pct is not none %}
+    <div style="font-size:13px; color:var(--text-muted); margin-top:3px">{{ "%+.2f" | format(pct) }}% return</div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if contributors %}
+<div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px">Per Asset</div>
+{% for c in contributors %}
+<div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
+    <span style="font-size:13px; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55%">{{ c.name }}</span>
+    <div style="text-align:right; flex-shrink:0">
+        <span class="mono {% if c.change >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:13px">
+            {% if c.change >= 0 %}+{% endif %}{{ c.change | format_display }}
+        </span>
+        {% if c.change_pct is not none %}
+        <span style="font-size:10px; color:var(--text-muted); margin-left:5px">{{ "%+.1f" | format(c.change_pct) }}%</span>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+{% else %}
+<div style="color:var(--text-muted); font-size:13px; padding:12px 0">No changes recorded for this period.</div>
+{% endif %}

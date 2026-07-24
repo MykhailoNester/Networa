@@ -1,0 +1,18 @@
+<tr id="sheet-row-{{ sheet.id }}">
+    <td><input type="text" name="name" value="{{ sheet.name }}" required style="width:180px"></td>
+    <td><input type="number" name="sort_order" value="{{ sheet.sort_order }}" style="width:70px"></td>
+    <td>{{ sheet.asset_count }}</td>
+    <td>
+        <div style="display:flex; gap:4px">
+            <button class="btn btn-sm btn-primary"
+                    hx-post="/sheets/{{ sheet.id }}/edit"
+                    hx-target="#sheet-row-{{ sheet.id }}"
+                    hx-swap="outerHTML"
+                    hx-include="closest tr">Save</button>
+            <button class="btn btn-sm btn-secondary"
+                    hx-get="/sheets/{{ sheet.id }}/display-row"
+                    hx-target="#sheet-row-{{ sheet.id }}"
+                    hx-swap="outerHTML">Cancel</button>
+        </div>
+    </td>
+</tr>

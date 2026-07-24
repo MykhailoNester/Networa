@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenv
+.venv/
+venv/
+env/
+
+# Env / secrets
+.env
+.mcp.json
+
+# SQLite — ship ONLY the seeded demo DB; never a real DB, never WAL/SHM sidecars
+data/*.db
+!data/demo.db
+data/*.db-wal
+data/*.db-shm
+data/*.db.bak*
+
+# Personal / financial data — never publish
+cashflow/
+reference/
+
+# Internal workflow / planning artifacts — not for the public repo
+team/
+.claude/agents/
+.claude/settings.local.json
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store

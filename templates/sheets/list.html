@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}Sheets - Networa{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Sheets</h1>
+    <button class="btn btn-primary" onclick="document.getElementById('addSheetModal').style.display='flex'">+ Add Sheet</button>
+</div>
+
+{% if request.query_params.get('saved') %}
+<div style="background: rgba(16,185,129,0.12); color: #10b981; padding: 10px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+    Sheet saved.
+</div>
+{% endif %}
+{% if request.query_params.get('deleted') %}
+<div style="background: rgba(239,68,68,0.1); color: #ef4444; padding: 10px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+    Sheet deleted.
+</div>
+{% endif %}
+{% if request.query_params.get('error') == 'has_assets' %}
+<div style="background: rgba(239,68,68,0.1); color: #ef4444; padding: 10px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+    Cannot delete a sheet with assigned assets.
+</div>
+{% endif %}
+{% if request.query_params.get('error') == 'empty_name' %}
+<div style="background: rgba(239,68,68,0.1); color: #ef4444; padding: 10px 16px; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+    Sheet name cannot be empty.
+</div>
+{% endif %}
+
+{% if sheets %}
+<div class="card">
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Sort Order</th>
+                    <th>Assets</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for sheet in sheets %}
+                <tr id="sheet-row-{{ sheet.id }}">
+                    <td>{{ sheet.name }}</td>
+                    <td class="mono">{{ sheet.sort_order }}</td>
+                    <td>{{ sheet.asset_count }}</td>
+                    <td>
+                        <div style="display:flex; gap:4px">
+                            <button class="btn btn-sm btn-secondary"
+                                    hx-get="/sheets/{{ sheet.id }}/edit-form"
+                                    hx-target="#sheet-row-{{ sheet.id }}"
+                                    hx-swap="outerHTML">Edit</button>
+                            <button class="btn btn-sm btn-danger"
+                                    hx-post="/sheets/{{ sheet.id }}/delete"
+                                    hx-confirm="Delete this sheet?"
+                                    hx-target="#sheet-row-{{ sheet.id }}"
+                                    hx-swap="outerHTML">Del</button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div style="padding-top:12px; font-size:12px; color:var(--text-muted)">{{ sheets | length }} sheets</div>
+</div>
+{% else %}
+<div class="card empty-state">
+    <h3>No sheets yet</h3>
+    <p>Create your first sheet to organize assets into groups.</p>
+    <button class="btn btn-primary" style="margin-top:16px"
+            onclick="document.getElementById('addSheetModal').style.display='flex'">+ Add Sheet</button>
+</div>
+{% endif %}
+
+<!-- Add Sheet Modal -->
+<div id="addSheetModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center;">
+    <div class="card" style="width:400px">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+            <h2 style="font-size:18px">Add Sheet</h2>
+            <button class="btn btn-sm" onclick="document.getElementById('addSheetModal').style.display='none'">&times;</button>
+        </div>
+        <form action="/sheets/create" method="post">
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" name="name" placeholder="e.g. Investments" required>
+            </div>
+            <div class="form-group">
+                <label>Sort Order</label>
+                <input type="number" name="sort_order" value="0">
+            </div>
+            <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px">
+                <button type="button" class="btn btn-secondary"
+                        onclick="document.getElementById('addSheetModal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Close modal on backdrop click
+    document.getElementById('addSheetModal').addEventListener('click', function(e) {
+        if (e.target === this) this.style.display = 'none';
+    });
+
+    // Handle HX-Trigger showError from delete response
+    document.body.addEventListener('showError', function(e) {
+        showToast(e.detail.value, 'error');
+    });
+});
+</script>
+{% endblock %}

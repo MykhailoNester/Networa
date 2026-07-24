@@ -1,0 +1,551 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Networa{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Net Worth Overview</h1>
+</div>
+
+<!-- Summary Cards -->
+<div class="cards-row" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))">
+    <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/networth', 'Top Holdings')">
+        <div class="label">Net Worth</div>
+        <div class="value">{{ data.net_worth | format_display }}</div>
+        {% if data.ytd_change is not none %}
+        <div class="change {% if data.ytd_change >= 0 %}text-positive{% else %}text-negative{% endif %}">
+            {% if data.ytd_change >= 0 %}+{% endif %}{{ data.ytd_change | format_display }}
+            ({{ "%+.1f" | format(data.ytd_change_pct) }}% YTD)
+        </div>
+        {% endif %}
+        <div class="bd-hint">↗ top holdings</div>
+    </div>
+    <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/assets', 'Assets by Class')">
+        <div class="label">Assets</div>
+        <div class="value text-muted" style="font-size:28px">{{ data.assets_count }}</div>
+        <div class="bd-hint">↗ by class</div>
+    </div>
+    <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/investable', 'Investable Breakdown')">
+        <div class="label">Investable</div>
+        <div class="value">{{ data.investable_assets | format_display }}</div>
+        <div class="change text-muted">
+            {{ "{:.0f}".format(data.investable_assets / data.total_assets * 100 if data.total_assets > 0 else 0) }}% of assets
+        </div>
+        <div class="bd-hint">↗ breakdown</div>
+    </div>
+</div>
+
+<!-- Period Returns Row -->
+{% if period_returns %}
+{% macro pct_card(label, val, change, period_key) %}
+<div class="card stat-card{% if val is not none %} bd-clickable{% endif %}"
+     {% if val is not none %}onclick="openBreakdown('/breakdown/period/{{ period_key }}', '{{ label }} Contributors')"{% endif %}>
+    <div class="label">{{ label }}</div>
+    {% if val is not none %}
+    <div class="value {% if val >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:22px">
+        {{ "%+.2f" | format(val) }}%
+    </div>
+    {% if change is not none %}
+    <div class="change {% if change >= 0 %}text-positive{% else %}text-negative{% endif %}">
+        {% if change >= 0 %}+{% endif %}{{ change | format_display }}
+    </div>
+    {% endif %}
+    <div class="bd-hint">↗ who contributed</div>
+    {% else %}
+    <div class="value text-muted" style="font-size:16px">—</div>
+    {% endif %}
+</div>
+{% endmacro %}
+<div class="cards-row" style="grid-template-columns: repeat(5, 1fr); margin-bottom: 24px">
+    {{ pct_card("MTD", period_returns.mtd, period_returns.get("mtd_change"), "mtd") }}
+    {{ pct_card("QTD", period_returns.qtd, period_returns.get("qtd_change"), "qtd") }}
+    {{ pct_card("YTD", period_returns.ytd, period_returns.get("ytd_change"), "ytd") }}
+    {{ pct_card("1Y", period_returns.one_year, period_returns.get("one_year_change"), "one_year") }}
+    {{ pct_card("All-Time", period_returns.all_time, period_returns.get("all_time_change"), "all_time") }}
+</div>
+{% endif %}
+
+<!-- Top Movers (30-day) -->
+{% if top_movers %}
+<div class="card" style="margin-bottom:24px">
+    <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px">
+        Top Movers
+        <span style="font-weight:400; text-transform:none; letter-spacing:0; font-size:11px; margin-left:6px">last 30 days</span>
+    </h3>
+    {% for m in top_movers %}
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
+        <span style="font-size:13px; color:var(--text-primary)">{{ m.name }}</span>
+        <div style="text-align:right">
+            <span class="mono {% if m.change_val >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:13px">
+                {% if m.change_val >= 0 %}+{% endif %}{{ m.change_val | format_display }}
+            </span>
+            {% if m.change_pct is not none %}
+            <span class="text-muted" style="font-size:11px; margin-left:6px">{{ "%+.1f" | format(m.change_pct) }}%</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Net Worth History Chart -->
+{% if history %}
+<div class="card" style="margin-bottom: 24px">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+        <h3 style="font-size: 13px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin:0">Net Worth Over Time</h3>
+        <div class="range-selector">
+            <button class="range-btn" data-days="30">1M</button>
+            <button class="range-btn" data-days="90">3M</button>
+            <button class="range-btn" data-ytd="1">YTD</button>
+            <button class="range-btn" data-days="365">1Y</button>
+            <button class="range-btn active" data-days="0">All</button>
+        </div>
+    </div>
+    <div class="chart-container">
+        <canvas id="netWorthChart"></canvas>
+    </div>
+</div>
+{% endif %}
+
+<!-- Allocation Charts -->
+{% if data.allocation_by_class or data.allocation_by_sheet %}
+<div class="charts-row" style="grid-template-columns: 1fr 2fr; margin-bottom:24px">
+    <!-- Donut: Asset Class -->
+    {% if data.allocation_by_class %}
+    <div class="card chart-card">
+        <h3>By Asset Class</h3>
+        <canvas id="allocationClassChart" width="260" height="260"></canvas>
+    </div>
+    {% endif %}
+
+    <!-- Stacked Bar: By Sheet -->
+    {% if data.allocation_by_sheet %}
+    <div class="card">
+        <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px">By Sheet</h3>
+        <div style="position:relative; height:120px">
+            <canvas id="sheetBarChart"></canvas>
+        </div>
+        <!-- Sheet legend with values -->
+        <div id="sheet-legend" style="display:flex; flex-wrap:wrap; gap:12px; margin-top:16px"></div>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Investable vs Non-Investable -->
+{% if data.total_assets > 0 %}
+{% set inv_pct = data.investable_assets / data.total_assets * 100 if data.total_assets > 0 else 0 %}
+{% set type_labels = {
+    'investable': 'Investable',
+    'investable_cash': 'Cash',
+    'investable_easy_convert': 'Easy Convert'
+} %}
+{% set type_colors = {
+    'investable': '#00c853',
+    'investable_cash': '#00bfa5',
+    'investable_easy_convert': '#69f0ae'
+} %}
+<div class="card" style="margin-bottom:24px">
+    <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:16px">Investable Breakdown</h3>
+
+    <!-- Totals row -->
+    <div style="display:flex; gap:24px; align-items:center; flex-wrap:wrap; margin-bottom:16px">
+        <div>
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:2px">Investable</div>
+            <div style="font-size:20px; font-weight:700; font-family:'Roboto Mono',monospace; color:var(--positive)">{{ data.investable_assets | format_display }}</div>
+            <div style="font-size:12px; color:var(--text-muted)">{{ "{:.1f}".format(inv_pct) }}%</div>
+        </div>
+        <div style="flex:1; min-width:200px">
+            <div class="investable-bar">
+                <div class="investable-bar-fill" style="width:{{ "{:.1f}".format(inv_pct) }}%"></div>
+            </div>
+        </div>
+        <div style="text-align:right">
+            <div style="font-size:12px; color:var(--text-secondary); margin-bottom:2px">Non-Investable</div>
+            <div style="font-size:20px; font-weight:700; font-family:'Roboto Mono',monospace; color:var(--text-secondary)">{{ data.non_investable_assets | format_display }}</div>
+            <div style="font-size:12px; color:var(--text-muted)">{{ "{:.1f}".format(100 - inv_pct) }}%</div>
+        </div>
+    </div>
+
+    <!-- Per-type breakdown -->
+    {% if data.investable_by_type %}
+    <div style="border-top:1px solid var(--border); padding-top:12px; display:flex; flex-direction:column; gap:8px">
+        {% for key, amount in data.investable_by_type.items() %}
+        {% set label = type_labels.get(key, key | replace('_', ' ') | title) %}
+        {% set color = type_colors.get(key, '#00c853') %}
+        {% set pct = amount / data.total_assets * 100 if data.total_assets > 0 else 0 %}
+        <div style="display:flex; align-items:center; gap:12px">
+            <span style="width:8px; height:8px; border-radius:50%; background:{{ color }}; flex-shrink:0"></span>
+            <span style="font-size:13px; color:var(--text-secondary); width:120px">{{ label }}</span>
+            <div style="flex:1; height:4px; background:var(--bg-hover); border-radius:2px; overflow:hidden">
+                <div style="height:100%; width:{{ "{:.1f}".format(pct) }}%; background:{{ color }}; border-radius:2px"></div>
+            </div>
+            <span class="mono" style="font-size:13px; color:var(--text-primary); width:100px; text-align:right">{{ amount | format_display }}</span>
+            <span style="font-size:12px; color:var(--text-muted); width:40px; text-align:right">{{ "{:.1f}".format(pct) }}%</span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- All Assets by Class Table -->
+<div class="card">
+    <h3 style="font-size: 13px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px;">Assets by Class</h3>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Class</th>
+                    <th class="text-right">Value ({{ display_currency }})</th>
+                    <th class="text-right">% of Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cls, info in data.allocation_by_class.items() %}
+                <tr>
+                    <td>
+                        <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:{{ info.color }}; margin-right:8px"></span>
+                        {{ info.display_name }}
+                    </td>
+                    <td class="text-right mono">{{ info.total | format_display }}</td>
+                    <td class="text-right mono">{{ "{:.1f}".format(info.total / data.total_assets * 100 if data.total_assets > 0 else 0) }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.bd-clickable { cursor: pointer; transition: background 0.12s; }
+.bd-clickable:hover { background: var(--bg-hover); }
+.bd-hint {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 8px;
+    letter-spacing: 0.3px;
+    user-select: none;
+}
+/* Modal */
+#breakdown-modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0;
+    color: var(--text-primary);
+    width: min(460px, 92vw);
+    max-height: 72vh;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+    /* force viewport-center regardless of layout ancestors */
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+}
+#breakdown-modal::backdrop {
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(3px);
+}
+#breakdown-modal-inner {
+    display: flex;
+    flex-direction: column;
+    max-height: 72vh;
+    overflow: hidden;
+    border-radius: 14px;
+}
+#breakdown-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+#breakdown-modal-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.2px;
+}
+#breakdown-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    padding: 2px 4px;
+    transition: color 0.12s;
+}
+#breakdown-modal-close:hover { color: var(--text-primary); }
+#breakdown-modal-body {
+    padding: 18px 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+</style>
+
+<!-- Breakdown Modal -->
+<dialog id="breakdown-modal">
+    <div id="breakdown-modal-inner">
+        <div id="breakdown-modal-header">
+            <span id="breakdown-modal-title"></span>
+            <button id="breakdown-modal-close">×</button>
+        </div>
+        <div id="breakdown-modal-body"></div>
+    </div>
+</dialog>
+
+<script>
+const _bdModal = document.getElementById('breakdown-modal');
+const _bdBody  = document.getElementById('breakdown-modal-body');
+const _bdTitle = document.getElementById('breakdown-modal-title');
+const _bdCache = {};
+
+document.getElementById('breakdown-modal-close').addEventListener('click', () => _bdModal.close());
+_bdModal.addEventListener('click', e => { if (e.target === _bdModal) _bdModal.close(); });
+
+async function openBreakdown(url, title) {
+    _bdTitle.textContent = title;
+    if (_bdCache[url]) {
+        _bdBody.innerHTML = _bdCache[url];
+        _bdModal.showModal();
+        return;
+    }
+    _bdBody.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:4px 0">Loading…</div>';
+    _bdModal.showModal();
+    try {
+        const resp = await fetch(url);
+        _bdCache[url] = await resp.text();
+        _bdBody.innerHTML = _bdCache[url];
+    } catch (e) {
+        _bdBody.innerHTML = '<div style="color:var(--text-muted);font-size:13px">Failed to load.</div>';
+    }
+}
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const allHistory = {{ history | tojson if history else '[]' }};
+    const displayMultiplier = {{ display_multiplier }};
+    const displaySymbol = {{ display_symbol | tojson }};
+
+    // --- Net Worth History Chart ---
+    const ctx = document.getElementById('netWorthChart');
+    let netWorthChart = null;
+
+    function filterHistory(days, ytd) {
+        if (!allHistory.length) return allHistory;
+        if (!days && !ytd) return allHistory;
+        const now = new Date();
+        let cutoff;
+        if (ytd) {
+            cutoff = new Date(now.getFullYear(), 0, 1);
+        } else {
+            cutoff = new Date(now);
+            cutoff.setDate(cutoff.getDate() - days);
+        }
+        return allHistory.filter(h => new Date(h.snapshot_date) >= cutoff);
+    }
+
+    const INVESTABLE_TYPE_LABELS = {
+        'investable': 'Investable',
+        'investable_cash': 'Cash',
+        'investable_easy_convert': 'Easy Convert'
+    };
+    const INVESTABLE_TYPE_COLORS = {
+        'investable': '#00c853',
+        'investable_cash': '#00bfa5',
+        'investable_easy_convert': '#69f0ae'
+    };
+
+    function buildChart(data) {
+        if (!ctx) return;
+        if (netWorthChart) netWorthChart.destroy();
+
+        const datasets = [{
+            label: 'Net Worth',
+            data: data.map(h => h.net_worth_usd * displayMultiplier),
+            borderColor: '#6366f1',
+            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: data.length < 30 ? 3 : 0,
+            pointHoverRadius: 6,
+            pointHoverBackgroundColor: '#6366f1',
+            pointHoverBorderColor: '#fff',
+            pointHoverBorderWidth: 2,
+        }];
+
+        // Collect all investable types that appear across snapshots
+        const allTypes = new Set();
+        data.forEach(h => { if (h.investable_breakdown) Object.keys(h.investable_breakdown).forEach(t => allTypes.add(t)); });
+
+        if (allTypes.size > 0) {
+            allTypes.forEach(type => {
+                datasets.push({
+                    label: INVESTABLE_TYPE_LABELS[type] || type,
+                    data: data.map(h => ((h.investable_breakdown && h.investable_breakdown[type]) || 0) * displayMultiplier),
+                    borderColor: INVESTABLE_TYPE_COLORS[type] || '#888',
+                    backgroundColor: 'transparent',
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 5,
+                    pointHoverBackgroundColor: INVESTABLE_TYPE_COLORS[type] || '#888',
+                    pointHoverBorderColor: '#fff',
+                    pointHoverBorderWidth: 2,
+                });
+            });
+        } else if (data.some(h => h.investable_total_usd > 0)) {
+            // Fallback for old snapshots without breakdown data
+            datasets.push({
+                label: 'Investable',
+                data: data.map(h => (h.investable_total_usd || 0) * displayMultiplier),
+                borderColor: '#00bfa5',
+                backgroundColor: 'transparent',
+                borderDash: [5, 5],
+                fill: false,
+                tension: 0.3,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+                pointHoverBackgroundColor: '#00bfa5',
+                pointHoverBorderColor: '#fff',
+                pointHoverBorderWidth: 2,
+            });
+        }
+
+        const showLegend = datasets.length > 1;
+        netWorthChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.map(h => h.snapshot_date),
+                datasets: datasets
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { display: showLegend, labels: { color: '#888', font: { size: 11 } } },
+                    tooltip: {
+                        backgroundColor: '#1e1e2e',
+                        borderColor: '#333',
+                        borderWidth: 1,
+                        titleColor: '#ccc',
+                        bodyColor: '#aaa',
+                        padding: 10,
+                        callbacks: {
+                            label: ctx => {
+                                const val = ctx.parsed.y;
+                                return ` ${ctx.dataset.label}: ${displaySymbol}${Math.round(val).toLocaleString()}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', maxTicksLimit: 8 } },
+                    y: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', callback: v => displaySymbol + v.toLocaleString() } }
+                }
+            }
+        });
+    }
+
+    if (ctx && allHistory.length) {
+        buildChart(allHistory);
+
+        document.querySelectorAll('.range-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                const days = parseInt(this.dataset.days) || 0;
+                const ytd = !!this.dataset.ytd;
+                buildChart(filterHistory(days, ytd));
+            });
+        });
+    }
+
+    // --- Allocation by Class Donut ---
+    const classCtx = document.getElementById('allocationClassChart');
+    if (classCtx) {
+        const classData = {{ data.allocation_by_class | tojson }};
+        new Chart(classCtx, {
+            type: 'doughnut',
+            data: {
+                labels: Object.values(classData).map(v => v.display_name),
+                datasets: [{
+                    data: Object.values(classData).map(v => v.total),
+                    backgroundColor: Object.values(classData).map(v => v.color),
+                    borderWidth: 0,
+                }]
+            },
+            options: {
+                responsive: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { color: '#888', font: { size: 11 } } }
+                }
+            }
+        });
+    }
+
+    // --- Stacked Horizontal Bar by Sheet ---
+    const sheetCtx = document.getElementById('sheetBarChart');
+    if (sheetCtx) {
+        const sheetData = {{ data.allocation_by_sheet | tojson }};
+        const sheetColors = ['#7c4dff', '#00bfa5', '#2979ff', '#ffab00', '#ff6d00', '#00c853', '#e91e63'];
+        const keys = Object.keys(sheetData);
+        const total = Object.values(sheetData).reduce((a, b) => a + b, 0);
+
+        new Chart(sheetCtx, {
+            type: 'bar',
+            data: {
+                labels: [''],
+                datasets: keys.map((k, i) => ({
+                    label: k,
+                    data: [sheetData[k]],
+                    backgroundColor: sheetColors[i % sheetColors.length],
+                    borderWidth: 0,
+                }))
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => ` ${ctx.dataset.label}: ${displaySymbol}${(ctx.raw * displayMultiplier).toLocaleString(undefined, {maximumFractionDigits:0})} (${(ctx.raw/total*100).toFixed(1)}%)`
+                        }
+                    }
+                },
+                scales: {
+                    x: { stacked: true, display: false },
+                    y: { stacked: true, display: false }
+                }
+            }
+        });
+
+        // Custom legend
+        const legend = document.getElementById('sheet-legend');
+        if (legend) {
+            keys.forEach((k, i) => {
+                const pct = total > 0 ? (sheetData[k] / total * 100).toFixed(1) : 0;
+                const val = (sheetData[k] * displayMultiplier).toLocaleString(undefined, {maximumFractionDigits:0});
+                legend.innerHTML += `
+                    <div style="display:flex; align-items:center; gap:6px; font-size:12px">
+                        <span style="width:10px; height:10px; border-radius:2px; background:${sheetColors[i % sheetColors.length]}; flex-shrink:0"></span>
+                        <span style="color:var(--text-secondary)">${k}</span>
+                        <span class="mono" style="color:var(--text-primary)">${displaySymbol}${val}</span>
+                        <span style="color:var(--text-muted)">${pct}%</span>
+                    </div>`;
+            });
+        }
+    }
+});
+</script>
+{% endblock %}

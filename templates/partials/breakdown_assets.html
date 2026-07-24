@@ -1,0 +1,12 @@
+{% for cls in by_class %}
+<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
+    <div style="display:flex; align-items:center; gap:6px; min-width:0">
+        <span style="width:7px; height:7px; border-radius:50%; background:{{ cls.color }}; flex-shrink:0"></span>
+        <span style="font-size:12px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap">{{ cls.display_name }}</span>
+        <span style="font-size:10px; color:var(--text-muted); flex-shrink:0">×{{ cls.count }}</span>
+    </div>
+    <span class="mono" style="font-size:12px; color:var(--text-primary); flex-shrink:0; margin-left:8px">{{ cls.total_value | format_display }}</span>
+</div>
+{% else %}
+<span style="font-size:12px; color:var(--text-muted)">No assets</span>
+{% endfor %}

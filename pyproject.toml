@@ -1,0 +1,20 @@
+# In-repo tooling config so the quality gate is reproducible everywhere
+# (CI, contributors, a fresh clone) and not inherited from a parent directory.
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, I import-sort, UP pyupgrade, B bugbear,
+# BLE blind-except, DTZ datetime-tz, RUF ruff-specific (incl. unused-noqa).
+select = ["E", "W", "F", "I", "UP", "B", "BLE", "DTZ", "RUF"]
+# Line length is handled by `ruff format`, so E501 is not enforced separately.
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

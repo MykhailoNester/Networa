@@ -1,0 +1,804 @@
+{% extends "base.html" %}
+{% block title %}{{ asset.name }} - Networa{% endblock %}
+
+{% block content %}
+{% set estimated_tax = asset.estimated_tax %}
+
+<!-- Header -->
+<div class="page-header" style="align-items: flex-start; margin-bottom: 24px;">
+    <div style="flex: 1;">
+        <a href="/assets" style="font-size: 13px; color: var(--text-secondary);">&larr; Back to Assets</a>
+        <h1 style="margin-top: 4px; margin-bottom: 4px;">{{ asset.name }}</h1>
+        <p class="text-muted" style="margin: 0; font-size: 13px;">
+            {{ asset.description or '' }}
+        </p>
+    </div>
+    <div id="asset-value-header" style="text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+        <div class="mono" style="font-size: 30px; font-weight: 700; line-height: 1.1;">
+            {{ current_value_usd | format_display }} {{ display_currency }}
+        </div>
+        {% if asset.currency != 'USD' %}
+        <div class="text-muted mono" style="font-size: 14px;">{{ asset.value | format_currency(asset.currency) }} {{ asset.currency }}</div>
+        {% endif %}
+        {% if estimated_tax %}
+        <span style="background: rgba(245,158,11,0.15); color: #f59e0b; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 600;">
+            Est. Tax: {{ estimated_tax | format_currency }}
+        </span>
+        {% endif %}
+        {% if asset.gain_loss is not none %}
+        <div class="{% if asset.gain_loss > 0 %}text-positive{% else %}text-negative{% endif %} mono" style="font-size: 13px;">
+            {% if asset.gain_loss >= 0 %}+{% endif %}{{ asset.gain_loss | format_currency }}
+            {% if asset.gain_loss_pct is not none %}({{ "{:+.1f}".format(asset.gain_loss_pct) }}%){% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs" id="detail-tabs" style="margin-bottom: 0;">
+    <button class="tab" data-tab="overview" onclick="showTab('overview', this)">OVERVIEW</button>
+    <button class="tab" data-tab="value" onclick="showTab('value', this)">VALUE</button>
+    <button class="tab" data-tab="returns" onclick="showTab('returns', this)">RETURNS</button>
+    <button class="tab" data-tab="reporting" onclick="showTab('reporting', this)">REPORTING</button>
+    <button class="tab" data-tab="assorted" onclick="showTab('assorted', this)">ASSORTED</button>
+    <button class="tab" data-tab="notes" onclick="showTab('notes', this)">NOTES</button>
+</div>
+
+{% if request.query_params.get('saved') %}
+<div style="background: rgba(16,185,129,0.12); color: #10b981; padding: 10px 16px; border-radius: 6px; margin-top: 12px; font-size: 13px;">
+    Changes saved successfully.
+</div>
+{% endif %}
+
+<!-- ======================================================= -->
+<!-- Tab: OVERVIEW                                            -->
+<!-- ======================================================= -->
+<div id="tab-overview" class="tab-panel" style="margin-top: 24px; display: none;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="detail-grid">
+        <div class="card">
+            <h3 class="section-label">Asset Info</h3>
+            <form action="/assets/{{ asset.id }}/edit" method="post">
+                <input type="hidden" name="tab" value="overview">
+                {% set cls = asset.asset_class %}
+                {% set no_ticker = cls in ['cash', 'real_estate', 'vehicle'] %}
+                {% if not no_ticker %}
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ticker Symbol</label>
+                        <input type="text" name="ticker" value="{{ asset.ticker or '' }}" placeholder="e.g. VTI, IAU">
+                    </div>
+                    <div class="form-group">
+                        <label>Quantity</label>
+                        <input type="number" name="quantity" step="0.0001" value="{{ asset.quantity or '' }}">
+                    </div>
+                </div>
+                {% endif %}
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Current Value</label>
+                        <div class="mono" style="padding: 8px 0; font-size: 17px; font-weight: 600;">
+                            {{ current_value_usd | format_display }} {{ display_currency }}
+                        </div>
+                        <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                            Record new values in the <a href="#" onclick="showTab('value', document.querySelector('[data-tab=value]')); return false;" style="color: var(--text-secondary); text-decoration: underline;">VALUE tab</a>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Currency</label>
+                        <select name="currency">
+                            {% for cur in ['USD', 'EUR', 'UAH', 'GBP', 'CHF'] %}
+                            <option value="{{ cur }}" {% if cur == asset.currency %}selected{% endif %}>{{ cur }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input type="text" name="name" value="{{ asset.name }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Sheet</label>
+                        <select name="sheet_id">
+                            <option value="">-- None --</option>
+                            {% for sheet in sheets %}
+                            <option value="{{ sheet.id }}" {% if sheet.id == asset.sheet_id %}selected{% endif %}>{{ sheet.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Purchase Date</label>
+                        <input type="date" name="purchase_date" value="{{ asset.purchase_date or '' }}">
+                    </div>
+                    {% if asset.holding_period_days is not none %}
+                    <div class="form-group">
+                        <label>Holding Period</label>
+                        <input type="text" disabled value="{{ asset.holding_period_days }} days" style="color: var(--text-secondary);">
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <input type="text" name="description" value="{{ asset.description or '' }}" placeholder="Short description">
+                </div>
+                <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px;">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+
+        <div>
+            <!-- Ticker card (for market assets) -->
+            {% if asset.ticker %}
+            <div class="card" style="margin-bottom: 16px;">
+                <h3 class="section-label">Market Data</h3>
+                <div style="font-size: 24px; font-weight: 700; font-family: 'Roboto Mono', monospace;">
+                    {{ asset.ticker }}
+                </div>
+                <div class="text-muted" style="font-size: 12px; margin-top: 2px;">{{ asset.exchange or '' }}</div>
+                {% if asset.price %}
+                <div class="mono" style="margin-top: 8px; font-size: 16px;">
+                    {{ asset.price | format_currency(decimals=2) }} <span class="text-muted" style="font-size: 12px;">{{ asset.price_currency or 'USD' }}</span>
+                </div>
+                {% endif %}
+                {% if asset.quantity %}
+                <div class="text-muted" style="margin-top: 4px; font-size: 13px;">
+                    Qty: {{ "{:,.4g}".format(asset.quantity) }}
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            <!-- Info card -->
+            <div class="card" style="margin-bottom: 16px;">
+                <h3 class="section-label">Details</h3>
+                <table style="width: 100%;" class="detail-info-table">
+                    <tr><td class="text-muted">Asset Class</td><td class="text-right">{{ asset.asset_class | replace('_', ' ') | title }}</td></tr>
+                    <tr><td class="text-muted">Sheet</td><td class="text-right">{{ asset.sheet_name or 'None' }}</td></tr>
+                    <tr><td class="text-muted">Ownership</td><td class="text-right">{{ "{:.0%}".format(asset.ownership) }}</td></tr>
+                    {% if asset.irr %}
+                    <tr>
+                        <td class="text-muted">IRR</td>
+                        <td class="text-right mono {% if asset.irr > 0 %}text-positive{% else %}text-negative{% endif %}">{{ "{:.1f}".format(asset.irr) }}%</td>
+                    </tr>
+                    {% endif %}
+                    {% if asset.liquidity %}
+                    <tr><td class="text-muted">Liquidity</td><td class="text-right">{{ asset.liquidity | title }}</td></tr>
+                    {% endif %}
+                    <tr><td class="text-muted">Added</td><td class="text-right text-muted">{{ (asset.created_at or '')[:10] }}</td></tr>
+                </table>
+            </div>
+
+            <form action="/assets/{{ asset.id }}/delete" method="post" onsubmit="return confirm('Delete this asset?')">
+                <button type="submit" class="btn btn-danger" style="width: 100%;">Delete Asset</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- Tab: VALUE                                               -->
+<!-- ======================================================= -->
+<div id="tab-value" class="tab-panel" style="margin-top: 24px; display: none;">
+    <!-- Stats row — always rendered so OOB swaps can target it -->
+    <div id="value-stats-cards" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+        <div class="card" style="text-align: center; padding: 16px;">
+            <div class="text-muted" style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">1 DAY</div>
+            {% if day_change %}
+            <div class="mono {% if day_change.value >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size: 20px; font-weight: 700;">
+                {% if day_change.value >= 0 %}+{% endif %}{{ day_change.value | format_currency }}
+            </div>
+            <div class="mono {% if day_change.pct >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size: 13px;">
+                {{ "{:+.2f}".format(day_change.pct) }}%
+            </div>
+            {% else %}
+            <div class="text-muted">--</div>
+            {% endif %}
+        </div>
+        <div class="card" style="text-align: center; padding: 16px;">
+            <div class="text-muted" style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px;">ALL-TIME</div>
+            {% if alltime_change %}
+            <div class="mono {% if alltime_change.value >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size: 20px; font-weight: 700;">
+                {% if alltime_change.value >= 0 %}+{% endif %}{{ alltime_change.value | format_currency }}
+            </div>
+            <div class="mono {% if alltime_change.pct >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size: 13px;">
+                {{ "{:+.2f}".format(alltime_change.pct) }}%
+            </div>
+            {% else %}
+            <div class="text-muted">--</div>
+            {% endif %}
+        </div>
+    </div>
+    {% if snapshots %}
+
+    <!-- Chart card -->
+    <div class="card" style="margin-bottom: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 class="section-label" style="margin: 0;">Value Over Time</h3>
+            <div style="display: flex; gap: 4px;">
+                {% for r in ['1M', '3M', 'YTD', '1Y', 'All'] %}
+                <button class="btn btn-sm range-btn {% if r == 'All' %}btn-primary{% else %}btn-secondary{% endif %}"
+                        onclick="setRange('{{ r }}', this)">{{ r }}</button>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="chart-container">
+            <canvas id="assetValueChart"></canvas>
+        </div>
+    </div>
+
+    <!-- History table -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 class="section-label" style="margin: 0;">Value History</h3>
+            <div style="display: flex; gap: 6px; align-items: center;">
+                <input type="date" id="new-snap-date" name="snapshot_date" value="{{ today }}"
+                       style="padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px;">
+                <input type="number" id="new-snap-value" name="value_usd" step="0.01" min="0"
+                       value="{{ current_value_usd | round(2) }}" placeholder="Value (USD)"
+                       style="width: 130px; padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px; text-align: right;">
+                <button class="btn btn-sm btn-primary"
+                        hx-post="/assets/{{ asset.id }}/snapshots/add"
+                        hx-include="#new-snap-date, #new-snap-value"
+                        hx-target="#snap-tbody"
+                        hx-swap="innerHTML">Add</button>
+                {% if asset.currency != 'USD' or (asset.ticker and asset.quantity) %}
+                <button class="btn btn-sm btn-secondary"
+                        hx-post="/assets/{{ asset.id }}/snapshots/add-auto"
+                        hx-include="#new-snap-date"
+                        hx-target="#snap-tbody"
+                        hx-swap="innerHTML"
+                        title="{% if asset.ticker and asset.quantity %}Fetch {{ asset.ticker }} price from Yahoo Finance ({{ asset.quantity }} units){% else %}Add snapshot using NBU exchange rate for {{ asset.currency }}{% endif %}">Auto</button>
+                {% endif %}
+            </div>
+        </div>
+        <div class="table-container">
+            <table id="value-history-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        {% if asset.ticker %}<th>Ticker</th>{% endif %}
+                        <th class="text-right">Value ({{ display_currency }})</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="snap-tbody">
+                    {% for s in snapshots | reverse %}
+                    <tr id="snap-row-{{ s.id }}">
+                        <td class="mono">{{ s.snapshot_date }}</td>
+                        {% if asset.ticker %}<td class="text-muted mono">{{ asset.ticker }}</td>{% endif %}
+                        <td class="text-right mono">{{ s.value_usd | format_display }}</td>
+                        <td>
+                            <div style="display:flex; gap:4px">
+                                <button class="btn btn-sm btn-secondary"
+                                        hx-get="/assets/{{ asset.id }}/snapshots/{{ s.id }}/edit-row"
+                                        hx-target="#snap-row-{{ s.id }}"
+                                        hx-swap="outerHTML">Edit</button>
+                                <button class="btn btn-sm btn-danger"
+                                        hx-post="/assets/{{ asset.id }}/snapshots/{{ s.id }}/delete"
+                                        hx-target="#snap-row-{{ s.id }}"
+                                        hx-swap="outerHTML"
+                                        hx-confirm="Delete this value record?">Delete</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% else %}
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 class="section-label" style="margin: 0;">Value History</h3>
+            <div style="display: flex; gap: 6px; align-items: center;">
+                <input type="date" id="new-snap-date" name="snapshot_date" value="{{ today }}"
+                       style="padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px;">
+                <input type="number" id="new-snap-value" name="value_usd" step="0.01" min="0"
+                       value="{{ current_value_usd | round(2) }}" placeholder="Value (USD)"
+                       style="width: 130px; padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px; text-align: right;">
+                <button class="btn btn-sm btn-primary"
+                        hx-post="/assets/{{ asset.id }}/snapshots/add"
+                        hx-include="#new-snap-date, #new-snap-value"
+                        hx-target="#snap-tbody"
+                        hx-swap="innerHTML">Add</button>
+                {% if asset.currency != 'USD' or (asset.ticker and asset.quantity) %}
+                <button class="btn btn-sm btn-secondary"
+                        hx-post="/assets/{{ asset.id }}/snapshots/add-auto"
+                        hx-include="#new-snap-date"
+                        hx-target="#snap-tbody"
+                        hx-swap="innerHTML"
+                        title="{% if asset.ticker and asset.quantity %}Fetch {{ asset.ticker }} price from Yahoo Finance ({{ asset.quantity }} units){% else %}Add snapshot using NBU exchange rate for {{ asset.currency }}{% endif %}">Auto</button>
+                {% endif %}
+            </div>
+        </div>
+        <div class="table-container">
+            <table id="value-history-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        {% if asset.ticker %}<th>Ticker</th>{% endif %}
+                        <th class="text-right">Value ({{ display_currency }})</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="snap-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+    <!-- Hidden placeholder so OOB chart-data swap always has a target -->
+    <div id="snap-chart-data" style="display:none"></div>
+</div>
+
+<!-- ======================================================= -->
+<!-- Tab: RETURNS                                             -->
+<!-- ======================================================= -->
+<div id="tab-returns" class="tab-panel" style="margin-top: 24px; display: none;">
+    {% set has_cashflows = cashflows | length > 0 %}
+    {% set has_cost_basis = asset.cost_basis is not none and asset.cost_basis %}
+
+    <!-- Metrics row -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 20px;">
+        {% if has_cashflows %}
+        <div class="card" style="text-align: center; padding: 14px;">
+            <div class="text-muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">CASH IN</div>
+            <div class="mono text-positive" style="font-size: 16px; font-weight: 700;">{{ cf_total_in | format_currency if cf_total_in else '--' }}</div>
+        </div>
+        <div class="card" style="text-align: center; padding: 14px;">
+            <div class="text-muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">CASH OUT</div>
+            <div class="mono text-negative" style="font-size: 16px; font-weight: 700;">{{ cf_total_out | format_currency if cf_total_out else '--' }}</div>
+        </div>
+        {% elif has_cost_basis %}
+        <div class="card" style="text-align: center; padding: 14px;">
+            <div class="text-muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">COST BASIS</div>
+            <div class="mono" style="font-size: 16px; font-weight: 700;">{{ asset.cost_basis | format_currency }}</div>
+        </div>
+        <div class="card" style="text-align: center; padding: 14px;">
+            <div class="text-muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">CURRENT VALUE</div>
+            <div class="mono" style="font-size: 16px; font-weight: 700;">{{ current_value_usd | format_currency }}</div>
+        </div>
+        <div class="card" style="text-align: center; padding: 14px;">
+            <div class="text-muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">GAIN / LOSS</div>
+            {% if asset.gain_loss is not none %}
+            <div class="mono {% if asset.gain_loss >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size: 16px; font-weight: 700;">
+                {% if asset.gain_loss >= 0 %}+{% endif %}{{ asset.gain_loss | format_currency }}
+            </div>
+            {% if asset.gain_loss_pct is not none %}
+            <div class="mono {% if asset.gain_loss_pct >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size: 12px;">
+                {{ "{:+.1f}".format(asset.gain_loss_pct) }}%
+            </div>
+            {% endif %}
+            {% else %}
+            <div class="text-muted" style="font-size: 16px; font-weight: 700;">--</div>
+            {% endif %}
+        </div>
+        {% endif %}
+        <div class="card" style="text-align: center; padding: 14px;">
+            <div class="text-muted" style="font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">IRR</div>
+            <div class="mono {% if asset.irr and asset.irr > 0 %}text-positive{% elif asset.irr and asset.irr < 0 %}text-negative{% endif %}" style="font-size: 16px; font-weight: 700;">
+                {% if asset.irr %}{{ "{:.1f}".format(asset.irr) }}%{% else %}--{% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if has_cashflows %}
+    <!-- ---- Cash Flow mode ---- -->
+    <div class="card">
+        <h3 class="section-label">Cash Flow <span class="text-muted" style="font-size:11px; font-weight:400; margin-left:6px;">buys &amp; sells</span></h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th class="text-right">Cash In (Buy)</th>
+                        <th class="text-right">Cash Out (Sell)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for cf in cashflows %}
+                    <tr id="asset-cf-row-{{ cf.id }}">
+                        <td class="mono">{{ cf.flow_date }}</td>
+                        <td class="text-muted">{{ cf.description or cf.notes or '' }}</td>
+                        <td class="text-right mono text-positive">{% if cf.cash_in_usd > 0 %}{{ cf.cash_in_usd | format_currency(decimals=2) }}{% endif %}</td>
+                        <td class="text-right mono text-negative">{% if cf.cash_out_usd > 0 %}{{ cf.cash_out_usd | format_currency(decimals=2) }}{% endif %}</td>
+                        <td>
+                            <div style="display:flex; gap:4px">
+                                <button class="btn btn-sm btn-secondary"
+                                        hx-get="/cashflows/{{ cf.id }}/edit-form?source=asset"
+                                        hx-target="#asset-cf-row-{{ cf.id }}"
+                                        hx-swap="outerHTML">Edit</button>
+                                <button class="btn btn-sm btn-danger"
+                                        hx-post="/cashflows/{{ cf.id }}/delete"
+                                        hx-confirm="Delete this transaction?"
+                                        hx-target="#asset-cf-row-{{ cf.id }}"
+                                        hx-swap="outerHTML">Del</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                    <tr style="font-weight:600; border-top:1px solid var(--border); color:var(--text-secondary)">
+                        <td colspan="2" class="text-muted" style="font-size:12px">Total</td>
+                        <td class="text-right mono text-positive">{{ cf_total_in | format_currency(decimals=2) }}</td>
+                        <td class="text-right mono text-negative">{{ cf_total_out | format_currency(decimals=2) }}</td>
+                        <td></td>
+                    </tr>
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <form action="/cashflows/create" method="post" id="asset-cf-add-form">
+                            <input type="hidden" name="asset_id" value="{{ asset.id }}">
+                            <input type="hidden" name="redirect_to" value="/assets/{{ asset.id }}?tab=returns">
+                        </form>
+                        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
+                        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
+                        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+                        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+                        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    <div style="margin-top: 16px; font-size: 13px; color: var(--text-muted);">
+        <strong>Cash In</strong> is money you put into the asset (investments, maintenance, etc.).
+        <strong>Cash Out</strong> is money that came out (dividends, sale proceeds, rent, etc.).
+    </div>
+
+    {% else %}
+    <!-- ---- Cost Basis mode (or empty) ---- -->
+    <div class="card" style="max-width: 500px;">
+        <h3 class="section-label">Cost Basis</h3>
+        <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
+            The total amount you invested or paid for this asset. Used to calculate gain/loss.
+        </p>
+        <form action="/assets/{{ asset.id }}/edit" method="post">
+            <input type="hidden" name="tab" value="returns">
+            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                <input type="number" name="cost_basis" step="0.01" min="0"
+                       value="{{ asset.cost_basis or '' }}" placeholder="0.00"
+                       style="width: 160px; font-size: 20px; font-weight: 700; font-family: 'Roboto Mono', monospace;">
+                <select name="cost_basis_currency" style="width: 90px;">
+                    {% for cur in ['USD', 'EUR', 'UAH', 'GBP', 'CHF'] %}
+                    <option value="{{ cur }}" {% if cur == (asset.cost_basis_currency or 'USD') %}selected{% endif %}>{{ cur }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-primary btn-sm">Save</button>
+            </div>
+        </form>
+        {% if asset.updated_at %}
+        <div class="text-muted" style="font-size: 12px;">Last Update: {{ asset.updated_at[:10] }}</div>
+        {% endif %}
+    </div>
+
+    <div style="margin-top: 16px; font-size: 13px; color: var(--text-muted);">
+        Alternatively, enter the cash flow (money you put in and took out) of this asset as it happens.
+    </div>
+    <!-- Empty cash flow table for adding transactions -->
+    <div class="card" style="margin-top: 12px;">
+        <h3 class="section-label">Cash Flow <span class="text-muted" style="font-size:11px; font-weight:400; margin-left:6px;">add transactions instead of cost basis</span></h3>
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th class="text-right">Cash In (Buy)</th>
+                        <th class="text-right">Cash Out (Sell)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td colspan="5" class="text-muted" style="font-size:13px; padding:12px 0">No transactions yet.</td></tr>
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <form action="/cashflows/create" method="post" id="asset-cf-add-form">
+                            <input type="hidden" name="asset_id" value="{{ asset.id }}">
+                            <input type="hidden" name="redirect_to" value="/assets/{{ asset.id }}?tab=returns">
+                        </form>
+                        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
+                        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
+                        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+                        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+                        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ======================================================= -->
+<!-- Tab: REPORTING                                           -->
+<!-- ======================================================= -->
+<div id="tab-reporting" class="tab-panel" style="margin-top: 24px; display: none;">
+    <div class="card" style="max-width: 600px;">
+        <form action="/assets/{{ asset.id }}/edit" method="post">
+            <input type="hidden" name="tab" value="reporting">
+
+            <!-- Investable -->
+            <div style="margin-bottom: 28px;">
+                <h3 class="section-label">Investable Asset?</h3>
+                <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
+                    Investable assets are those held in cash or in forms that can be quickly liquidated.
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
+                        <input type="radio" name="investable" value="investable_cash"
+                               {% if asset.investable == 'investable_cash' %}checked{% endif %}>
+                        Investable - Cash
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
+                        <input type="radio" name="investable" value="investable"
+                               {% if asset.investable == 'investable' %}checked{% endif %}>
+                        Investable - Easy to convert to cash
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
+                        <input type="radio" name="investable" value="non_investable"
+                               {% if asset.investable == 'non_investable' or not asset.investable %}checked{% endif %}>
+                        Non Investable
+                    </label>
+                </div>
+            </div>
+
+            <!-- Asset Class -->
+            <div style="margin-bottom: 28px;">
+                <h3 class="section-label">Asset Class</h3>
+                <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
+                    Shows on the Assets &times; Class Recap report.
+                </p>
+                <select name="asset_class" style="max-width: 300px;">
+                    {% for cls in asset_classes %}
+                    <option value="{{ cls.name }}" {% if cls.name == asset.asset_class %}selected{% endif %}>{{ cls.display_name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Tax Status -->
+            <div style="margin-bottom: 28px;">
+                <h3 class="section-label">Taxable Asset?</h3>
+                <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
+                    Will this asset be subject to taxes on liquidation or sale?
+                </p>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
+                        <input type="radio" name="tax_status" value="taxable"
+                               {% if asset.tax_status == 'taxable' %}checked{% endif %}>
+                        Taxable
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
+                        <input type="radio" name="tax_status" value="tax_deferred"
+                               {% if asset.tax_status == 'tax_deferred' %}checked{% endif %}>
+                        Tax Deferred
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
+                        <input type="radio" name="tax_status" value="tax_free"
+                               {% if asset.tax_status == 'tax_free' %}checked{% endif %}>
+                        Tax Free
+                    </label>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- Tab: ASSORTED                                            -->
+<!-- ======================================================= -->
+<div id="tab-assorted" class="tab-panel" style="margin-top: 24px; display: none;">
+    <div class="card" style="max-width: 700px;">
+        <form action="/assets/{{ asset.id }}/edit" method="post">
+            <input type="hidden" name="tab" value="assorted">
+
+            <!-- Ownership -->
+            <div style="margin-bottom: 28px;">
+                <h3 class="section-label">Ownership Percentage</h3>
+                <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
+                    Your share, if you co-own this asset with someone.
+                </p>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <input type="number" name="ownership" step="1" min="0" max="100"
+                           value="{{ (asset.ownership * 100) | round(0) | int }}"
+                           style="width: 100px;">
+                    <span class="text-muted">%</span>
+                </div>
+                {% if asset.updated_at %}
+                <div class="text-muted" style="font-size: 12px; margin-top: 6px;">
+                    Last Update: {{ asset.updated_at[:10] }}
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Tax Estimate: hidden entirely for tax_free assets -->
+            {% if asset.tax_status != 'tax_free' %}
+            <div style="margin-bottom: 28px;">
+                <h3 class="section-label">Tax Estimate</h3>
+                <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
+                    Estimated tax on unrealized gain. Edit cost basis in the <strong>Returns</strong> tab.
+                </p>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+                    <div>
+                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Cost Basis</label>
+                        <div class="mono" style="padding: 8px 0; font-size: 14px; color: var(--text-primary);">
+                            {% if asset.cost_basis %}{{ asset.cost_basis | format_currency }} {{ asset.cost_basis_currency or 'USD' }}{% else %}--{% endif %}
+                        </div>
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Unrealized Gain</label>
+                        <div class="mono {% if asset.gain_loss is not none and asset.gain_loss > 0 %}text-positive{% elif asset.gain_loss is not none and asset.gain_loss < 0 %}text-negative{% endif %}"
+                             style="padding: 8px 0; font-size: 14px;">
+                            {% if asset.gain_loss is not none %}
+                            {% if asset.gain_loss >= 0 %}+{% endif %}{{ asset.gain_loss | format_currency }}
+                            {% else %}--{% endif %}
+                        </div>
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Tax Rate</label>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <input type="number" name="tax_rate" step="0.1" min="0" max="100"
+                                   value="{{ asset.tax_rate or '' }}" placeholder="0" style="width: 80px;">
+                            <span class="text-muted" style="font-size: 13px;">%</span>
+                        </div>
+                        {% if asset.tax_rate %}
+                        <div style="font-size: 11px; color: #f59e0b; margin-top: 4px;">Tax Rate Overridden</div>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <label style="font-size: 11px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 4px;">Estimated Tax</label>
+                        <div class="mono text-negative" style="padding: 8px 0; font-size: 14px;">
+                            {% if estimated_tax is not none %}{{ estimated_tax | format_currency }}{% else %}--{% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Optional fields -->
+            <div style="margin-bottom: 20px;">
+                <h3 class="section-label">Additional Info</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                    <div class="form-group">
+                        <label>Country</label>
+                        <input type="text" name="country" value="{{ asset.country or '' }}" placeholder="e.g. US">
+                    </div>
+                    <div class="form-group">
+                        <label>Region</label>
+                        <input type="text" name="region" value="{{ asset.region or '' }}" placeholder="e.g. North America">
+                    </div>
+                    <div class="form-group">
+                        <label>Sector</label>
+                        <input type="text" name="sector" value="{{ asset.sector or '' }}" placeholder="e.g. Technology">
+                    </div>
+                    <div class="form-group">
+                        <label>Liquidity</label>
+                        <select name="liquidity">
+                            <option value="">-- None --</option>
+                            {% for liq in ['high', 'medium', 'low', 'illiquid'] %}
+                            <option value="{{ liq }}" {% if asset.liquidity == liq %}selected{% endif %}>{{ liq | title }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end;">
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- Tab: NOTES                                               -->
+<!-- ======================================================= -->
+<div id="tab-notes" class="tab-panel" style="margin-top: 24px; display: none;">
+    <div class="card" style="max-width: 700px;">
+        <form action="/assets/{{ asset.id }}/edit" method="post">
+            <input type="hidden" name="tab" value="notes">
+            <h3 class="section-label">Notes</h3>
+            <div class="form-group">
+                <textarea name="notes" rows="12" style="width: 100%; resize: vertical; font-size: 14px;">{{ asset.notes or '' }}</textarea>
+            </div>
+            <div style="display: flex; justify-content: flex-end; margin-top: 12px;">
+                <button type="submit" class="btn btn-primary">Save Notes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+var snapData = {{ snapshots | tojson }};
+var activeChart = null;
+var currentRange = 'All';
+
+function showTab(name, btn) {
+    document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
+    document.querySelectorAll('#detail-tabs .tab').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + name).style.display = 'block';
+    if (btn) btn.classList.add('active');
+    if (name === 'value' && !activeChart) initChart('All');
+}
+
+function initChart(range) {
+    var filtered = filterSnapshots(range);
+    var ctx = document.getElementById('assetValueChart');
+    if (!ctx) return;
+    if (activeChart) activeChart.destroy();
+    activeChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: filtered.map(s => s.snapshot_date),
+            datasets: [{
+                label: 'Value (USD)',
+                data: filtered.map(s => s.value_usd),
+                borderColor: '#8b5cf6',
+                backgroundColor: 'rgba(139,92,246,0.12)',
+                fill: true,
+                tension: 0.3,
+                pointRadius: filtered.length < 30 ? 3 : 0,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', maxTicksLimit: 8 } },
+                y: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', callback: v => '$' + v.toLocaleString() } }
+            }
+        }
+    });
+}
+
+function filterSnapshots(range) {
+    if (range === 'All' || !snapData.length) return snapData;
+    var now = new Date();
+    var cutoff;
+    if (range === '1M') cutoff = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
+    else if (range === '3M') cutoff = new Date(now.getFullYear(), now.getMonth() - 3, now.getDate());
+    else if (range === 'YTD') cutoff = new Date(now.getFullYear(), 0, 1);
+    else if (range === '1Y') cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    return snapData.filter(s => new Date(s.snapshot_date) >= cutoff);
+}
+
+function setRange(range, btn) {
+    currentRange = range;
+    document.querySelectorAll('.range-btn').forEach(b => {
+        b.classList.remove('btn-primary');
+        b.classList.add('btn-secondary');
+    });
+    btn.classList.remove('btn-secondary');
+    btn.classList.add('btn-primary');
+    if (!activeChart) { initChart(range); return; }
+    var filtered = filterSnapshots(range);
+    activeChart.data.labels = filtered.map(s => s.snapshot_date);
+    activeChart.data.datasets[0].data = filtered.map(s => s.value_usd);
+    activeChart.update();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Activate tab from URL param or default to 'overview'
+    var params = new URLSearchParams(window.location.search);
+    var tab = params.get('tab') || 'overview';
+    var btn = document.querySelector('[data-tab="' + tab + '"]');
+    showTab(tab, btn);
+
+    // Default cashflow add date to today
+    var d = document.getElementById('asset-cf-date');
+    if (d && !d.value) d.value = new Date().toISOString().slice(0, 10);
+});
+</script>
+{% endblock %}
