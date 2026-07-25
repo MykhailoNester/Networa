@@ -7,7 +7,12 @@
 <!-- Header -->
 <div class="page-header" style="align-items: flex-start; margin-bottom: 24px;">
     <div style="flex: 1;">
+        {# This page serves debts too, so the way back follows the row's category. #}
+        {% if asset.category == 'debt' %}
+        <a href="/debts" style="font-size: 13px; color: var(--text-secondary);">&larr; Back to Debts</a>
+        {% else %}
         <a href="/assets" style="font-size: 13px; color: var(--text-secondary);">&larr; Back to Assets</a>
+        {% endif %}
         <h1 style="margin-top: 4px; margin-bottom: 4px;">{{ asset.name }}</h1>
         <p class="text-muted" style="margin: 0; font-size: 13px;">
             {{ asset.description or '' }}

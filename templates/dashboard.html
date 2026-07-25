@@ -8,21 +8,32 @@
 
 <!-- Summary Cards -->
 <div class="cards-row" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))">
-    <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/networth', 'Top Holdings')">
+    <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/networth', 'Net Worth Breakdown')">
         <div class="label">Net Worth</div>
         <div class="value">{{ data.net_worth | format_display }}</div>
         {% if data.ytd_change is not none %}
         <div class="change {% if data.ytd_change >= 0 %}text-positive{% else %}text-negative{% endif %}">
             {% if data.ytd_change >= 0 %}+{% endif %}{{ data.ytd_change | format_display }}
-            ({{ "%+.1f" | format(data.ytd_change_pct) }}% YTD)
+            {% if data.ytd_change_pct is not none %}({{ "%+.1f" | format(data.ytd_change_pct) }}% YTD){% else %}YTD{% endif %}
         </div>
         {% endif %}
-        <div class="bd-hint">↗ top holdings</div>
+        <div class="bd-hint">↗ assets − debts</div>
     </div>
     <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/assets', 'Assets by Class')">
         <div class="label">Assets</div>
-        <div class="value text-muted" style="font-size:28px">{{ data.assets_count }}</div>
+        <div class="value">{{ data.total_assets | format_display }}</div>
+        <div class="change text-muted">{{ data.assets_count }} tracked</div>
         <div class="bd-hint">↗ by class</div>
+    </div>
+    <div class="card stat-card bd-clickable" onclick="location.href='/debts'">
+        <div class="label">Debts</div>
+        <div class="value {% if data.total_debts > 0 %}text-negative{% else %}text-muted{% endif %}">
+            {% if data.total_debts > 0 %}−{% endif %}{{ data.total_debts | format_display }}
+        </div>
+        <div class="change text-muted">
+            {% if data.debts_count %}{{ data.debts_count }} tracked{% else %}none tracked{% endif %}
+        </div>
+        <div class="bd-hint">↗ manage debts</div>
     </div>
     <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/investable', 'Investable Breakdown')">
         <div class="label">Investable</div>
@@ -33,6 +44,20 @@
         <div class="bd-hint">↗ breakdown</div>
     </div>
 </div>
+
+<!-- The balance-sheet identity, stated plainly: the headline number is derived. -->
+{% if data.total_debts > 0 %}
+<div class="card" style="margin-bottom:24px; display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; padding:14px 18px">
+    <span class="mono" style="font-size:15px; color:var(--text-secondary)">{{ data.total_assets | format_display }}</span>
+    <span class="text-muted" style="font-size:13px">assets</span>
+    <span class="text-muted" style="font-size:15px">−</span>
+    <span class="mono text-negative" style="font-size:15px">{{ data.total_debts | format_display }}</span>
+    <span class="text-muted" style="font-size:13px">debts</span>
+    <span class="text-muted" style="font-size:15px">=</span>
+    <span class="mono" style="font-size:17px; font-weight:700; color:var(--text-primary)">{{ data.net_worth | format_display }}</span>
+    <span class="text-muted" style="font-size:13px">net worth</span>
+</div>
+{% endif %}
 
 <!-- Period Returns Row -->
 {% if period_returns %}
@@ -197,7 +222,9 @@
                 <tr>
                     <th>Class</th>
                     <th class="text-right">Value ({{ display_currency }})</th>
-                    <th class="text-right">% of Total</th>
+                    {# Denominated by gross assets, not net worth — these are
+                       composition shares and must sum to 100%. #}
+                    <th class="text-right">% of Assets</th>
                 </tr>
             </thead>
             <tbody>

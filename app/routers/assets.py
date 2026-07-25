@@ -177,7 +177,8 @@ async def asset_detail_page(request: Request, asset_id: int):
             "day_change": day_change,
             "alltime_change": alltime_change,
             "today": date.today().isoformat(),  # noqa: DTZ011 - local calendar date
-            "page": "assets",
+            # Debts reuse this page; keep the sidebar highlight on their own tab.
+            "page": "debts" if asset.get("category") == "debt" else "assets",
         },
     )
 
@@ -399,11 +400,13 @@ def _value_cell_html(asset: dict) -> str:
     if asset.get("ticker"):
         qty = f" {asset['quantity']:,.0f}" if asset.get("quantity") else ""
         ticker_line = f'<div class="text-muted" style="font-size:11px; margin-top:2px">{e(asset["ticker"])}{qty}</div>'
+    # This fragment also swaps into the debts page, where balances read red.
+    tone = " text-negative" if asset.get("category") == "debt" else ""
     return f"""<td id="value-cell-{aid}" class="text-right"
     hx-get="/assets/{aid}/inline-edit"
     hx-target="#value-cell-{aid}" hx-swap="outerHTML"
     style="cursor:pointer" title="Click to record new value">
-    <div class="mono" style="font-size:15px; font-weight:600">{main}</div>
+    <div class="mono{tone}" style="font-size:15px; font-weight:600">{main}</div>
     {ticker_line}
 </td>"""
 

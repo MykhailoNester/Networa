@@ -236,10 +236,19 @@ class ExchangeRateResponse(BaseModel):
 
 # --- Dashboard ---
 class DashboardResponse(BaseModel):
+    """Shape of GET /api/v1/dashboard. net_worth is total_assets - total_debts."""
+
     net_worth: float
     total_assets: float
     total_debts: float
-    allocation_by_class: dict[str, float]
+    investable_assets: float
+    investable_by_type: dict[str, float]
+    non_investable_assets: float
+    # Keyed by asset-class name; each value carries total/display_name/color.
+    allocation_by_class: dict[str, dict]
     allocation_by_sheet: dict[str, float]
+    debts_by_name: dict[str, float]
     assets_count: int
     debts_count: int
+    ytd_change: float | None = None
+    ytd_change_pct: float | None = None

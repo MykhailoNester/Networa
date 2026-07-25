@@ -18,6 +18,7 @@ def client():
         "/",
         "/assets",
         "/assets/1",
+        "/debts",
         "/cashflows",
         "/import",
         "/exchange-rates",

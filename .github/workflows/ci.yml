@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # develop is the integration branch — feature/* work lands there first, so it
+    # needs the same gate as main. Feature branches themselves are covered by
+    # the pull_request trigger below.
+    branches: [main, develop]
   pull_request:
 
 jobs:

@@ -48,7 +48,36 @@ pytest                       # tests
 ```
 
 `make format` auto-formats; `ruff check --fix .` auto-fixes what it can.
-The `main` branch is expected to be lint-clean, `mypy`-clean, and green.
+Both `main` and `develop` are expected to be lint-clean, `mypy`-clean, and green.
+
+## Branching model
+
+Two long-lived branches:
+
+- **`main`** — released, always-deployable state. Never commit to it directly.
+- **`develop`** — the integration branch. All work merges here first; `main`
+  advances from `develop` at release time.
+
+Everything else is short-lived and branches **off `develop`**:
+
+| Prefix | For | Example |
+|---|---|---|
+| `feature/` | a new user-visible capability | `feature/net-worth-liabilities` |
+| `fix/` | a bug fix | `fix/ytd-divide-by-zero` |
+| `chore/` | tooling, CI, deps, docs-only | `chore/bump-ruff` |
+
+Use lowercase kebab-case after the prefix, and name the change, not the
+ticket: `feature/holdings-sort`, not `feature/wip` or `feature/issue-42`.
+
+```bash
+git switch develop && git pull
+git switch -c feature/my-change
+# … work, then run `make check-all` …
+git push -u origin feature/my-change     # open the PR against develop
+```
+
+One branch per logical change. CI runs `make check-all` on every pull request
+and on every push to `main` or `develop`.
 
 ## Architecture & conventions
 
@@ -74,6 +103,7 @@ The `main` branch is expected to be lint-clean, `mypy`-clean, and green.
 
 ## Pull requests
 
+- Target **`develop`**, not `main`.
 - Keep PRs focused; one logical change per PR.
 - Run the check gate and include a clear description of what and why.
 - Do not add `Co-Authored-By` trailers to commits.

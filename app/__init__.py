@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
         assets,
         cashflows,
         dashboard,
+        debts,
         exchange_rates,
         import_data,
         sheets,
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
 
     app.include_router(dashboard.router)
     app.include_router(assets.router)
+    app.include_router(debts.router)
     app.include_router(sheets.router)
     app.include_router(cashflows.router)
     app.include_router(snapshots.router)

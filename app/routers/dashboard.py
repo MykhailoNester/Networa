@@ -43,7 +43,10 @@ async def breakdown_networth(request: Request):
         {
             "request": request,
             "top_assets": top_assets,
-            "total": data["net_worth"],
+            "total_assets": data["total_assets"],
+            "total_debts": data["total_debts"],
+            "net_worth": data["net_worth"],
+            "debts_by_name": data["debts_by_name"],
         },
     )
 

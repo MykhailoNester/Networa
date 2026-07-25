@@ -15,8 +15,9 @@ A self-hosted personal net-worth and asset tracker for monitoring assets, debts,
 
 ## Features
 
-- **Dashboard** — net worth summary, YTD change, asset allocation charts
+- **Dashboard** — net worth (assets − debts), YTD change, asset allocation charts
 - **Assets** — multi-currency asset list with inline value editing and gain/loss tracking
+- **Debts** — mortgages, loans and credit balances, subtracted from assets to give net worth
 - **Cash Flow** — log contributions, withdrawals, and dividends per asset
 - **Exchange Rates** — manual FX rates with one-click USD recalculation
 - **Import** — bulk import of assets and cash flows from CSV (see [docs/import-format.md](docs/import-format.md))
