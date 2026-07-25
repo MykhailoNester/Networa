@@ -37,23 +37,30 @@ A self-hosted personal net-worth and asset tracker for monitoring assets, debts,
   </tr>
   <tr>
     <td><img src="docs/media/breakdown.png" alt="Allocation breakdown"><br><sub><b>Allocation</b> — breakdown by asset class and by sheet</sub></td>
-    <td><img src="docs/media/cashflow.png" alt="Cash flow"><br><sub><b>Cash flow</b> — contributions, withdrawals and dividends with in / out / net totals</sub></td>
+    <td><img src="docs/media/breakdown-investable.png" alt="Investable breakdown"><br><sub><b>Investable breakdown</b> — investable vs illiquid vs non-investable tiers, plus assets by class</sub></td>
   </tr>
   <tr>
+    <td><img src="docs/media/cashflow.png" alt="Cash flow"><br><sub><b>Cash flow</b> — contributions, withdrawals and dividends with in / out / net totals</sub></td>
     <td><img src="docs/media/import.png" alt="CSV import"><br><sub><b>CSV import</b> — bring in assets and cash flows from any source</sub></td>
+  </tr>
+  <tr>
     <td><img src="docs/media/exchange-rates.png" alt="Exchange rates"><br><sub><b>Exchange rates</b> — manual FX with one-click USD recalculation</sub></td>
+    <td></td>
   </tr>
 </table>
 
 ## Requirements
 
-- Python 3.12+
+- **Python 3.12 or newer.** Check with `python3 -V`. The `python3` that ships
+  with macOS is older (3.9), which will fail at the install step with a
+  confusing "no matching distribution" error — install a current Python from
+  [python.org](https://www.python.org/downloads/) or via Homebrew first.
 
 ## Run
 
 ```bash
-# 1. Create and activate virtual environment
-python -m venv .venv
+# 1. Create and activate a virtual environment
+python3 -m venv .venv
 source .venv/bin/activate
 
 # 2. Install dependencies
@@ -62,6 +69,10 @@ pip install -r requirements.txt
 # 3. Run the development server
 python main.py
 ```
+
+(Step 1 uses `python3` because most systems have no plain `python`. After
+`activate`, `python` and `pip` refer to the virtual environment, so steps 2–3
+use them directly.)
 
 The app will be available at **http://localhost:8000**.
 
@@ -139,8 +150,11 @@ For automated backups, add a cron entry:
 │   ├── schema.sql           # Canonical database schema (single source of truth)
 │   ├── models.py            # Pydantic schemas
 │   ├── forms.py             # Typed form-field helpers
+│   ├── html.py              # Escaping helpers for router-built HTML
+│   ├── security.py          # Same-origin + Host checks
 │   ├── routers/             # FastAPI route handlers
-│   └── services/            # Business logic
+│   ├── services/            # Business logic (incl. first-run sample seeding)
+│   └── static/vendor/       # Vendored htmx, Chart.js and fonts (no CDN)
 ├── templates/               # Jinja2 HTML templates
 ├── scripts/                 # Utility scripts (seed_demo.py, backup.sh)
 ├── docs/                    # Documentation (import format, etc.)

@@ -6,36 +6,49 @@ finance app built with FastAPI, HTMX, Jinja2, and SQLite. Please also read the
 
 ## Development setup
 
-Requires Python 3.12+.
+Requires Python 3.12+ (`python3 -V` — macOS ships an older 3.9, which cannot
+install the pinned dependencies).
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv                    # python3: most systems have no `python`
+source .venv/bin/activate                # after this, `python`/`pip` are the venv's
 pip install -r requirements.txt
-pip install ruff mypy pytest        # dev tools
+pip install -r requirements-dev.txt      # pinned ruff, mypy, pytest — same as CI
 
-# Run against the shipped demo database
-python scripts/seed_demo.py         # (re)build data/demo.db with sample data
-python main.py                      # http://localhost:8000
+python main.py                           # http://localhost:8000
 ```
 
-The app defaults to the seeded `data/demo.db`. Never point tests or development
-at a real personal database — use the demo DB or a throwaway copy
-(`DATABASE_PATH=/tmp/scratch.db`).
+By default the app creates and uses `data/networa.db`, seeded with a small
+sample portfolio on first run. To work against the richer committed demo
+dataset instead:
+
+```bash
+python scripts/seed_demo.py         # (re)build data/demo.db, if needed
+DB_NAME=demo.db python main.py      # the DB_NAME is required — it is not the default
+```
+
+Never point tests or development at a real personal database — use the demo DB
+or a throwaway copy (`DATABASE_PATH=/tmp/scratch.db`).
 
 ## The check gate
 
-Before opening a PR, make sure all of these pass:
+Before opening a PR, run the same gate CI runs:
+
+```bash
+make check-all
+```
+
+That is equivalent to:
 
 ```bash
 ruff format --check .        # formatting
 ruff check .                 # lint
 mypy app/                    # type check (must report no issues)
-pytest                       # tests, if present
+pytest                       # tests
 ```
 
-`ruff format .` auto-formats; `ruff check --fix .` auto-fixes what it can.
-The `main` branch is expected to be lint-clean and `mypy`-clean.
+`make format` auto-formats; `ruff check --fix .` auto-fixes what it can.
+The `main` branch is expected to be lint-clean, `mypy`-clean, and green.
 
 ## Architecture & conventions
 
@@ -49,8 +62,12 @@ The `main` branch is expected to be lint-clean and `mypy`-clean.
   (`get_str`, `get_float`, …) rather than coercing `request.form()` values
   inline.
 - **Templates:** Jinja2 + HTMX; prefer server-rendered partials over
-  client-side JavaScript. Vendored JS lives in `app/static/vendor/` (served
-  locally, no CDN).
+  client-side JavaScript. Vendored JS and fonts live in `app/static/vendor/`
+  (served locally, no CDN — don't reintroduce one).
+- **Escaping:** Jinja autoescapes, but a few routers build HTMX fragments as
+  f-strings where it does not apply. In those, pass every interpolated value
+  through `app.html.e()`, and any JSON embedded in a `<script>` through
+  `app.html.json_for_script()`. New fragments are better as Jinja partials.
 - **Money:** values are stored and aggregated in USD; use `currency_service`
   for conversions and `CURRENCY_SYMBOLS` for display symbols.
 - **File naming:** snake_case for Python, kebab-case for templates/docs.
