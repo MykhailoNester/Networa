@@ -7,8 +7,9 @@
 
 A self-hosted personal net-worth and asset tracker for monitoring assets, debts, cash flows, and net worth over time. Built with FastAPI, HTMX, and Chart.js on a dark-themed UI. Your data stays on your machine in a local SQLite database — no accounts, no cloud, no telemetry.
 
-<!-- Screenshots: add to docs/media/ and reference here, e.g. -->
-<!-- ![Dashboard](docs/media/dashboard.png) -->
+<p align="center">
+  <img src="docs/media/dashboard.png" alt="Networa dashboard — net worth overview with net-worth-over-time chart and allocation" width="860">
+</p>
 
 > **Security note:** this is a single-user app with **no authentication**. It binds to `127.0.0.1` by default. Only expose it beyond localhost behind a trusted reverse proxy that adds auth — see [SECURITY.md](SECURITY.md).
 
@@ -20,6 +21,29 @@ A self-hosted personal net-worth and asset tracker for monitoring assets, debts,
 - **Exchange Rates** — manual FX rates with one-click USD recalculation
 - **Import** — bulk import of assets and cash flows from CSV (see [docs/import-format.md](docs/import-format.md))
 - **Snapshots** — automatic daily snapshots + manual trigger; historical net worth chart
+
+## Demo
+
+<p align="center">
+  <img src="docs/media/hero.gif" alt="Networa walkthrough — dashboard, top holdings, an asset detail, and sheets" width="860">
+</p>
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/media/assets.png" alt="Assets"><br><sub><b>Assets</b> — multi-currency holdings with cost basis, IRR and gain/loss, grouped into sheets</sub></td>
+    <td width="50%"><img src="docs/media/asset-detail.png" alt="Asset detail"><br><sub><b>Asset detail</b> — overview, value history, returns and notes per asset</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/breakdown.png" alt="Allocation breakdown"><br><sub><b>Allocation</b> — breakdown by asset class and by sheet</sub></td>
+    <td><img src="docs/media/cashflow.png" alt="Cash flow"><br><sub><b>Cash flow</b> — contributions, withdrawals and dividends with in / out / net totals</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/media/import.png" alt="CSV import"><br><sub><b>CSV import</b> — bring in assets and cash flows from any source</sub></td>
+    <td><img src="docs/media/exchange-rates.png" alt="Exchange rates"><br><sub><b>Exchange rates</b> — manual FX with one-click USD recalculation</sub></td>
+  </tr>
+</table>
 
 ## Requirements
 

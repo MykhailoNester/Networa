@@ -30,17 +30,18 @@ Database is persisted to `./data` volume.
 
 ```
 app/
-  __init__.py           # app factory, Jinja2 setup, router registration
+  __init__.py           # app factory (lifespan), Jinja2 setup, router registration
   config.py             # settings (db path, host, port)
-  database.py           # async SQLite connection, schema init
+  database.py           # async SQLite connection + schema init
+  schema.sql            # canonical database schema — single source of truth (no migrations dir)
   models.py             # Pydantic request/response schemas
+  forms.py              # typed form-field helpers
   routers/              # route handlers (dashboard, assets, cashflows, snapshots, exchange_rates, sheets, import_data)
                         # CSV import format documented in docs/import-format.md
   services/             # business logic (asset_service, snapshot_service, currency_service, import_service)
 templates/              # Jinja2 HTML templates
-migrations/
-  001_initial_schema.sql  # table definitions, indexes, seeded asset classes
 scripts/
+  seed_demo.py          # (re)build the synthetic data/demo.db
   backup.sh             # WAL-safe SQLite backup with retention
 data/                   # SQLite database: data/demo.db (default, shipped) / user DB via DB_NAME|DATABASE_PATH
 ```
@@ -49,7 +50,7 @@ data/                   # SQLite database: data/demo.db (default, shipped) / use
 
 - **Routers → Services → Database** pattern; keep business logic in `services/`, not routers.
 - **No authentication** — single-user, self-hosted deployment.
-- Schema is initialized automatically from `migrations/001_initial_schema.sql` on first run.
+- Schema is initialized automatically from the single `app/schema.sql` on first run (idempotent; there is no migrations directory).
 - SQLite pragmas applied at startup: `PRAGMA journal_mode=WAL`, `PRAGMA foreign_keys=ON`.
 - 9 asset classes are pre-seeded (stocks, real estate, crypto, etc.).
 
