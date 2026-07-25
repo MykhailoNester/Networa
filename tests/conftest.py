@@ -18,3 +18,7 @@ _TEST_DB = Path(_TEST_DIR) / "test.db"
 shutil.copyfile(_DEMO_DB, _TEST_DB)
 
 os.environ["DATABASE_PATH"] = str(_TEST_DB)
+
+# TestClient issues requests as Host: testserver. Addresses and localhost are
+# always allowed, but "testserver" is a hostname, so it needs listing.
+os.environ.setdefault("ALLOWED_HOSTS", "testserver")

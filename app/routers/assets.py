@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .. import templates
 from ..forms import get_float, get_opt_float, get_opt_str, get_str
+from ..html import e, json_for_script
 from ..models import AssetCreate, AssetUpdate
 from ..services import asset_service
 
@@ -378,15 +379,16 @@ def _value_cell_html(asset: dict) -> str:
     from ..services.currency_service import _display_state
 
     aid = asset["id"]
-    disp_cur = _display_state["currency"]
-    disp_sym = _display_state["symbol"]
+    # Escaped once here so every interpolation below is safe.
+    disp_cur = e(_display_state["currency"])
+    disp_sym = e(_display_state["symbol"])
     disp_mult = _display_state["multiplier"]
     current_usd = asset.get("current_value_usd") or asset.get("value_usd") or 0
     disp_val = current_usd * disp_mult
 
     if asset["currency"] != "USD":
-        native = f"{asset['currency']} {asset['value']:,.0f}"
-        if asset["currency"] == disp_cur:
+        native = f"{e(asset['currency'])} {asset['value']:,.0f}"
+        if asset["currency"] == _display_state["currency"]:
             main = native
         else:
             main = f'{native} <div class="text-muted" style="font-size:11px">{disp_sym}{disp_val:,.0f} {disp_cur}</div>'
@@ -396,7 +398,7 @@ def _value_cell_html(asset: dict) -> str:
     ticker_line = ""
     if asset.get("ticker"):
         qty = f" {asset['quantity']:,.0f}" if asset.get("quantity") else ""
-        ticker_line = f'<div class="text-muted" style="font-size:11px; margin-top:2px">{asset["ticker"]}{qty}</div>'
+        ticker_line = f'<div class="text-muted" style="font-size:11px; margin-top:2px">{e(asset["ticker"])}{qty}</div>'
     return f"""<td id="value-cell-{aid}" class="text-right"
     hx-get="/assets/{aid}/inline-edit"
     hx-target="#value-cell-{aid}" hx-swap="outerHTML"
@@ -411,8 +413,6 @@ def _value_cell_html(asset: dict) -> str:
 
 async def _build_value_oob_html(db, asset_id: int) -> str:
     """Build HTMX OOB swap fragments: header value, stats cards, and chart data update."""
-    import json as _json
-
     from ..services.currency_service import CURRENCY_SYMBOLS as _CURRENCY_SYMBOLS
     from ..services.currency_service import _display_state
 
@@ -422,9 +422,10 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
 
     current_usd = asset.get("current_value_usd") or asset.get("value_usd") or 0
     state = _display_state
-    disp_sym = state["symbol"]
+    # Escaped once here so every interpolation below is safe.
+    disp_sym = e(state["symbol"])
     disp_mult = state["multiplier"]
-    disp_cur = state["currency"]
+    disp_cur = e(state["currency"])
 
     def _fmt(val):
         """Format USD value in display currency."""
@@ -440,12 +441,14 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
     # ── Header OOB ────────────────────────────────────────────
     native_html = ""
     if asset.get("currency", "USD") != "USD":
-        sym = _CURRENCY_SYMBOLS.get(
-            (asset["currency"]).upper(), asset["currency"] + "\u202f"
+        sym = e(
+            _CURRENCY_SYMBOLS.get(
+                (asset["currency"]).upper(), asset["currency"] + "\u202f"
+            )
         )
         native_html = (
             f'<div class="text-muted mono" style="font-size: 14px;">'
-            f"{sym}{(asset.get('value') or 0):,.0f} {asset['currency']}</div>\n"
+            f"{sym}{(asset.get('value') or 0):,.0f} {e(asset['currency'])}</div>\n"
         )
 
     tax_html = ""
@@ -537,7 +540,9 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
     )
 
     # ── Chart data OOB ────────────────────────────────────────
-    snaps_json = _json.dumps(snapshots)
+    # json_for_script, not json.dumps: snapshots carry a user-set currency, and a
+    # value containing "</script>" would otherwise break out of the block below.
+    snaps_json = json_for_script(snapshots)
     chart_oob = (
         f'<div id="snap-chart-data" hx-swap-oob="true" style="display:none">'
         f"<script>"
@@ -573,14 +578,14 @@ def _snap_display_row(snap: dict, has_ticker: bool, ticker: str = "") -> str:
     from ..services.currency_service import _display_state
 
     sid = snap["id"]
-    disp_sym = _display_state["symbol"]
+    disp_sym = e(_display_state["symbol"])
     disp_mult = _display_state["multiplier"]
     converted = (snap["value_usd"] or 0) * disp_mult
     val_fmt = f"{disp_sym}{converted:,.2f}"
-    ticker_cell = f'<td class="text-muted mono">{ticker}</td>' if has_ticker else ""
+    ticker_cell = f'<td class="text-muted mono">{e(ticker)}</td>' if has_ticker else ""
     return f"""
 <tr id="snap-row-{sid}">
-    <td class="mono">{snap["snapshot_date"]}</td>
+    <td class="mono">{e(snap["snapshot_date"])}</td>
     {ticker_cell}
     <td class="text-right mono">{val_fmt}</td>
     <td>
@@ -616,10 +621,10 @@ async def snapshot_edit_row(asset_id: int, snapshot_id: int):
     asset = await asset_service.get_asset(asset_id)
     has_ticker = bool(asset and asset.get("ticker"))
     ticker = asset.get("ticker", "") if asset else ""
-    ticker_cell = f'<td class="text-muted mono">{ticker}</td>' if has_ticker else ""
+    ticker_cell = f'<td class="text-muted mono">{e(ticker)}</td>' if has_ticker else ""
     return HTMLResponse(f"""
 <tr id="snap-row-{snapshot_id}">
-    <td class="mono">{snap["snapshot_date"]}</td>
+    <td class="mono">{e(snap["snapshot_date"])}</td>
     {ticker_cell}
     <td>
         <input type="number" name="value_usd" id="snap-val-{snapshot_id}"

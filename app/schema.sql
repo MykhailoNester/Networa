@@ -164,13 +164,20 @@ CREATE INDEX IF NOT EXISTS idx_cashflows_date ON cashflows(flow_date);
 -- Seed data: default display currency + the nine asset classes with chart colors.
 INSERT OR IGNORE INTO settings (key, value) VALUES ('display_currency', 'USD');
 
-INSERT OR IGNORE INTO asset_classes (name, display_name, color) VALUES
-    ('real_estate',    'Real Estate',    '#7c4dff'),
-    ('precious_metal', 'Precious Metal', '#00bfa5'),
-    ('cash',           'Cash',           '#00c853'),
-    ('stock',          'Stock',          '#2979ff'),
-    ('fund',           'Fund',           '#448aff'),
-    ('crypto',         'Crypto',         '#ff9100'),
-    ('vehicle',        'Vehicle',        '#ff6d00'),
-    ('investment',     'Investment',     '#ffab00'),
-    ('miscellaneous',  'Miscellaneous',  '#78909c');
+-- Explicit ids on purpose. asset_classes is AUTOINCREMENT, and an
+-- INSERT OR IGNORE that loses the UNIQUE(name) race still consumes rowids from
+-- the sequence — so with implicit ids this statement bumped
+-- sqlite_sequence on EVERY startup, leaving the database file modified just
+-- because the app was launched. That made the committed data/demo.db show up
+-- dirty in `git status` after a demo run, one `git add` away from being
+-- republished. Supplying the ids keeps this genuinely idempotent.
+INSERT OR IGNORE INTO asset_classes (id, name, display_name, color) VALUES
+    (1, 'real_estate',    'Real Estate',    '#7c4dff'),
+    (2, 'precious_metal', 'Precious Metal', '#00bfa5'),
+    (3, 'cash',           'Cash',           '#00c853'),
+    (4, 'stock',          'Stock',          '#2979ff'),
+    (5, 'fund',           'Fund',           '#448aff'),
+    (6, 'crypto',         'Crypto',         '#ff9100'),
+    (7, 'vehicle',        'Vehicle',        '#ff6d00'),
+    (8, 'investment',     'Investment',     '#ffab00'),
+    (9, 'miscellaneous',  'Miscellaneous',  '#78909c');

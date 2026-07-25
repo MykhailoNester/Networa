@@ -6,7 +6,7 @@ Self-hosted personal net-worth and asset tracker for monitoring assets, debts, c
 
 - **Backend:** Python 3.12+, FastAPI, aiosqlite (async SQLite)
 - **Frontend:** Jinja2 templates, HTMX, Chart.js, custom dark-theme CSS
-- **Database:** SQLite with WAL mode (`data/demo.db` default, shipped / user DB via `DB_NAME` | `DATABASE_PATH`)
+- **Database:** SQLite with WAL mode. Default `data/networa.db` (gitignored, created and sample-seeded on first run). `data/demo.db` is the committed screenshot dataset — never put real data in it. Override with `DB_NAME` | `DATABASE_PATH`.
 - **Deployment:** Docker / Docker Compose
 
 ## Development
@@ -31,26 +31,31 @@ Database is persisted to `./data` volume.
 ```
 app/
   __init__.py           # app factory (lifespan), Jinja2 setup, router registration
-  config.py             # settings (db path, host, port)
+  config.py             # settings (db path, host, port, allowed hosts, sample seeding)
   database.py           # async SQLite connection + schema init
   schema.sql            # canonical database schema — single source of truth (no migrations dir)
   models.py             # Pydantic request/response schemas
   forms.py              # typed form-field helpers
+  html.py               # escaping helpers for router-built HTML fragments
+  security.py           # same-origin + Host enforcement middleware
   routers/              # route handlers (dashboard, assets, cashflows, snapshots, exchange_rates, sheets, import_data)
                         # CSV import format documented in docs/import-format.md
-  services/             # business logic (asset_service, snapshot_service, currency_service, import_service)
+  services/             # business logic (asset_service, snapshot_service, currency_service, import_service,
+                        #   sample_data — first-run seeding of an empty DB)
 templates/              # Jinja2 HTML templates
 scripts/
   seed_demo.py          # (re)build the synthetic data/demo.db
   backup.sh             # WAL-safe SQLite backup with retention
-data/                   # SQLite database: data/demo.db (default, shipped) / user DB via DB_NAME|DATABASE_PATH
+data/                   # SQLite databases: networa.db (default, gitignored) + demo.db (committed sample)
 ```
 
 ## Architecture Notes
 
 - **Routers → Services → Database** pattern; keep business logic in `services/`, not routers.
-- **No authentication** — single-user, self-hosted deployment.
-- Schema is initialized automatically from the single `app/schema.sql` on first run (idempotent; there is no migrations directory).
+- **No authentication** — single-user, self-hosted deployment. Because of that, `app/security.py` rejects state-changing requests a browser reports as cross-origin, and restricts the `Host` header to block DNS rebinding. The host rule turns on *names*, not addresses: every IP literal and `localhost` are always allowed (they cannot be repointed), while other hostnames need `ALLOWED_HOSTS`. Non-browser clients are unaffected.
+- **Escaping is manual in router-built HTML.** Some HTMX fragments are assembled as f-strings, where Jinja's autoescaping does not apply. Every interpolated DB value must go through `app.html.e()`, and any JSON embedded in a `<script>` block through `app.html.json_for_script()`. Prefer adding new fragments as Jinja partials under `templates/` instead.
+- No third-party requests to render the UI: fonts, HTMX and Chart.js are all vendored under `app/static/vendor/`. Don't reintroduce a CDN link.
+- Schema is initialized automatically from the single `app/schema.sql` on first run (idempotent; there is no migrations directory). Note this cannot add a column to an existing table — adding one needs a real migration step.
 - SQLite pragmas applied at startup: `PRAGMA journal_mode=WAL`, `PRAGMA foreign_keys=ON`.
 - 9 asset classes are pre-seeded (stocks, real estate, crypto, etc.).
 

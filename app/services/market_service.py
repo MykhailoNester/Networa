@@ -1,6 +1,7 @@
 """Market data service — fetch ticker prices from Yahoo Finance."""
 
 from datetime import UTC, datetime
+from urllib.parse import quote
 
 
 async def fetch_ticker_price(ticker: str, price_date: str) -> tuple[float, str] | None:
@@ -17,8 +18,11 @@ async def fetch_ticker_price(ticker: str, price_date: str) -> tuple[float, str] 
         period1 = int(dt.timestamp())
         period2 = period1 + 86400  # one full day window
 
+        # Tickers are free-text user input, so percent-encode before splicing
+        # into the path — an unencoded "?" or "/" would otherwise rewrite the
+        # query string or walk the path.
         url = (
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(ticker, safe='')}"
             f"?interval=1d&period1={period1}&period2={period2}"
         )
         headers = {"User-Agent": "Mozilla/5.0"}

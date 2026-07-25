@@ -1,10 +1,16 @@
 services:
   app:
     build: .
+    # Bound to loopback on purpose: the app has no authentication, so it must
+    # not be reachable from the local network. To expose it deliberately, put a
+    # reverse proxy that adds TLS + auth in front of it (see SECURITY.md).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
     environment:
-      - DB_NAME=demo.db
+      # Your own database, created on first run. Set DB_NAME=demo.db to browse
+      # the shipped sample data instead — but note demo.db is tracked in git, so
+      # don't put real holdings in it.
+      - DB_NAME=networa.db

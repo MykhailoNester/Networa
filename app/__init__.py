@@ -6,14 +6,27 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from .config import settings
 from .database import close_db, init_db
+from .security import AllowedHostMiddleware, SameOriginMiddleware
 from .services import currency_service
+from .services.sample_data import maybe_seed_sample_data
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Startup
     await init_db()
+    if settings.SEED_SAMPLE_DATA:
+        created = await maybe_seed_sample_data()
+        if created:
+            # Printed, not logged: this is first-run guidance for someone who
+            # just ran `python main.py`, and belongs next to uvicorn's banner.
+            print(
+                f"Seeded {created} sample assets into {settings.DATABASE_PATH.name} "
+                "(every row is noted as sample data — delete them once you add "
+                "your own, or start empty with SEED_SAMPLE_DATA=0)."
+            )
     await currency_service.reload_display_state()
     _sync_display_globals()
     yield
@@ -42,6 +55,11 @@ def _format_display(value, decimals: int = 0) -> str:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Networa", version="0.1.0", lifespan=_lifespan)
+
+    # Added inner-first: Starlette runs the last-added middleware outermost, so
+    # the Host check happens before the origin check.
+    app.add_middleware(SameOriginMiddleware)
+    app.add_middleware(AllowedHostMiddleware)
 
     app.mount(
         "/static",

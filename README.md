@@ -65,8 +65,19 @@ python main.py
 
 The app will be available at **http://localhost:8000**.
 
-By default the app runs against the seeded demo database shipped at `data/demo.db`,
-so you can explore the UI immediately with sample data.
+On first run it creates `data/networa.db` — your own database, excluded from git —
+and seeds it with a small sample portfolio so the dashboard isn't blank. Every
+sample row is labelled "Sample data — safe to delete"; delete them as you add
+real holdings, or start completely empty with `SEED_SAMPLE_DATA=0`.
+
+To browse the richer dataset used for the screenshots above:
+
+```bash
+DB_NAME=demo.db python main.py
+```
+
+> `data/demo.db` is committed to this repository. It exists to demo the UI —
+> keep real holdings out of it, or you risk publishing them.
 
 ### Using your own database
 
@@ -77,19 +88,25 @@ Point the app at a different database with either environment variable:
 DB_NAME=mydata.db python main.py
 
 # Or provide a full path anywhere on disk
-DATABASE_PATH=/absolute/path/to/networth.db python main.py
+DATABASE_PATH=/absolute/path/to/mydata.db python main.py
 ```
 
 `DATABASE_PATH` takes precedence over `DB_NAME`. The SQLite database is created
-automatically on first run if it does not yet exist.
+automatically on first run if it does not yet exist. Anything matching
+`data/*.db` other than `demo.db` is gitignored.
 
 The `HOST` and `PORT` environment variables override the default `127.0.0.1:8000`.
+`ALLOWED_HOSTS` controls which `Host` headers the app answers to — see
+[SECURITY.md](SECURITY.md).
 
 ---
 
 ## Database Backup
 
 A backup script is included at `scripts/backup.sh`. It uses SQLite's online backup API (safe with WAL mode while the app is running).
+
+It backs up whichever database the app is configured to use (`DATABASE_PATH`,
+then `DB_NAME`, then the `data/networa.db` default), and names the file after it.
 
 ```bash
 # Backup to ./backups, keep last 30 days
@@ -127,7 +144,8 @@ For automated backups, add a cron entry:
 ├── templates/               # Jinja2 HTML templates
 ├── scripts/                 # Utility scripts (seed_demo.py, backup.sh)
 ├── docs/                    # Documentation (import format, etc.)
-└── data/                    # SQLite databases (only demo.db is committed)
+└── data/                    # SQLite databases (only demo.db is committed;
+                             #   your networa.db stays local)
 ```
 
 The schema lives in a single `app/schema.sql` applied idempotently on startup —

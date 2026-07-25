@@ -1,11 +1,10 @@
-import html
-
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from .. import templates
 from ..database import get_db
 from ..forms import get_float, get_opt_str, get_str
+from ..html import e as _e
 from ..models import CashflowCreate, CashflowUpdate
 from ..services import cashflow_service
 
@@ -178,11 +177,6 @@ async def cashflow_display_row(cashflow_id: int, source: str = "cashflows"):
 
 
 # --- HTML helpers ---
-
-
-def _e(val) -> str:
-    """HTML-escape a value for safe insertion into attributes and text."""
-    return html.escape(str(val or ""), quote=True)
 
 
 def _fmt_usd(val) -> str:

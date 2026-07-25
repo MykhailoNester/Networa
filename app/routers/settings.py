@@ -1,3 +1,5 @@
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Request
 from fastapi.responses import RedirectResponse
 
@@ -25,5 +27,11 @@ async def set_display_currency(request: Request):
     await currency_service.reload_display_state()
     _sync_display_globals()
 
+    # Bounce back to the page the switch was used on, but only ever to a path on
+    # this app — Referer is attacker-settable, and echoing it verbatim into a
+    # redirect turns this into an open redirect.
     referer = request.headers.get("referer", "/")
-    return RedirectResponse(referer, status_code=303)
+    path = urlsplit(referer).path or "/"
+    if not path.startswith("/") or path.startswith("//"):
+        path = "/"
+    return RedirectResponse(path, status_code=303)
