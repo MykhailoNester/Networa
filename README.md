@@ -23,6 +23,7 @@ A self-hosted personal net-worth and asset tracker for monitoring assets, debts,
 - **Import** — bulk import of assets and cash flows from CSV (see [docs/import-format.md](docs/import-format.md))
 - **Snapshots** — manual and market-driven value history per asset; historical net worth chart
 - **Auto-valuation** — refresh every ticker-bearing asset from live market data on demand, or on an opt-in daily schedule (see [docs/auto-valuation.md](docs/auto-valuation.md))
+- **Settings** — toggle the daily auto-valuation schedule and see its run hour, last run, and next scheduled run
 
 ## Demo
 

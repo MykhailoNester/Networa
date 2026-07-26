@@ -72,7 +72,7 @@ silently drop to zero on the trend chart because an upstream had a bad day.
 curl -X POST http://127.0.0.1:8000/api/v1/valuation/daily-run
 ```
 
-| In-app schedule | Toggled from the Dashboard, or `POST /settings/auto-valuation` | Runs the same full daily job automatically. **Off by default.** |
+| In-app schedule | Toggled from Settings, or `POST /settings/auto-valuation` | Runs the same full daily job automatically. **Off by default.** |
 
 ## The opt-in daily schedule
 
@@ -88,22 +88,40 @@ key/value table (no schema change):
 | `auto_valuation_run_hour` | `"0"`–`"23"` | `"3"` (3 AM local time) |
 | `auto_valuation_last_run` | `"YYYY-MM-DD"` | `""` (never) |
 
-Turning it on and setting the hour is a small card on the Dashboard, or:
+Turning it on and setting the hour is done from the **Settings** page (which
+also shows whether the loop is currently running and when it is next expected
+to fire), or:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/settings/auto-valuation \
      -d "enabled=1" -d "run_hour=3"
 ```
 
-The loop checks every 15 minutes whether the local calendar date has advanced
-since `auto_valuation_last_run` **and** the clock has reached `run_hour`; if
-so, it runs once and advances the marker — whether the run succeeded or
-failed, so a broken upstream is retried once a day, not every 15 minutes.
-Turning the setting on when the hour has already passed today runs it
-promptly rather than waiting until tomorrow, and a container that was off
-overnight catches up on its next boot — no wall-clock arithmetic that DST
-could break. Turning the setting off stops the loop immediately, without a
+The loop wakes up every 15 minutes and asks `should_run` (`app/scheduler.py`)
+whether to fire, given `auto_valuation_last_run` and `run_hour`:
+
+- never run before (`auto_valuation_last_run` empty or unparseable) -> run
+  now;
+- already ran today -> wait;
+- the last run is strictly earlier than yesterday, i.e. at least one whole
+  calendar day was missed while the app was off -> run **immediately**,
+  whatever the current hour;
+- the last run was yesterday -> the normal cadence: wait until the clock
+  reaches `run_hour`.
+
+Either way the marker advances whether the run succeeded or failed, so a
+broken upstream (Yahoo or NBU down) is retried once a day, not every 15
+minutes. Turning the setting off stops the loop immediately, without a
 restart.
+
+The catch-up case is what makes a container that was off for several days —
+or one that only happens to be up outside its `run_hour` window — notice and
+run on its next boot rather than never running at all, or waiting until
+`run_hour` comes around again. It is not a backfill, though: a caught-up run
+still prices everything as of *today*. `market_service.fetch_ticker_price`
+returns a current quote, not a historical one, so the prices for the actual
+missed days are gone; the schedule only guarantees the numbers are never more
+than one calendar day stale, and the normal daily cadence resumes right after.
 
 ## Weekends and outside market hours
 

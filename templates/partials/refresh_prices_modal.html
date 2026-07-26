@@ -1,0 +1,150 @@
+{# The "Refresh Prices" report, as a native <dialog> rather than an inline
+   swap target — with 20+ priced assets the old inline report pushed the
+   summary cards down the page every time someone clicked the button.
+
+   Included by both the dashboard and the assets page (alongside
+   partials/refresh_prices_button.html, which opens it), so it is entirely
+   self-contained: its own ids, its own <style>, its own <script>, no
+   dependency on the dashboard-only breakdown modal (#breakdown-modal,
+   _bdModal/_bdBody/_bdTitle/_bdCache in templates/dashboard.html) and no
+   shared names with it. #}
+<style>
+#refresh-prices-modal {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0;
+    color: var(--text-primary);
+    width: min(480px, 92vw);
+    max-height: 80vh;
+    box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+    /* force viewport-center regardless of layout ancestors */
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    margin: 0;
+}
+#refresh-prices-modal::backdrop {
+    background: rgba(0,0,0,0.65);
+    backdrop-filter: blur(3px);
+}
+#refresh-prices-modal-inner {
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+    overflow: hidden;
+    border-radius: 14px;
+}
+#refresh-prices-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+#refresh-prices-modal-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.2px;
+}
+#refresh-prices-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    padding: 2px 4px;
+    transition: color 0.12s;
+}
+#refresh-prices-modal-close:hover { color: var(--text-primary); }
+#refresh-prices-modal-body {
+    padding: 18px 20px;
+    /* Fixed max-height + scroll: 20+ priced rows scroll inside the dialog
+       instead of growing it past the viewport. */
+    max-height: calc(80vh - 60px);
+    overflow-y: auto;
+    flex: 1;
+}
+</style>
+
+<dialog id="refresh-prices-modal">
+    <div id="refresh-prices-modal-inner">
+        <div id="refresh-prices-modal-header">
+            <span id="refresh-prices-modal-title">Refresh Prices</span>
+            <button type="button" id="refresh-prices-modal-close">&times;</button>
+        </div>
+        <div id="refresh-prices-modal-body"></div>
+    </div>
+</dialog>
+
+<script>
+(function () {
+    var modal = document.getElementById('refresh-prices-modal');
+    var body = document.getElementById('refresh-prices-modal-body');
+
+    // Every way of closing the dialog — the header's close button, a
+    // backdrop click below, a Close button the swapped-in report itself
+    // renders, and Esc's own default action — ends by firing the dialog's
+    // native "close" event. That makes this the one place that decides
+    // whether a repricing that changed something must reload the page, so
+    // the dashboard/assets totals it just touched cannot sit stale behind a
+    // dialog the user has dismissed.
+    modal.addEventListener('close', function () {
+        if (modal.dataset.reloadOnClose === '1') location.reload();
+    });
+
+    document.getElementById('refresh-prices-modal-close').addEventListener('click', function () {
+        modal.close();
+    });
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) modal.close();
+    });
+
+    // The swapped-in report (templates/partials/refresh_prices.html) marks
+    // its root with data-updated, which is how this self-contained modal
+    // learns whether the run changed anything without reading anything else
+    // off the page.
+    body.addEventListener('htmx:afterSwap', function () {
+        var root = body.querySelector('[data-updated]');
+        var updated = root ? parseInt(root.dataset.updated, 10) || 0 : 0;
+        // The response can land *after* the dialog was dismissed: a batch
+        // reprices every ticker asset with one network call apiece, so it can
+        // run for seconds, and an impatient user closing it is exactly the
+        // case this modal exists for. By then "close" has already fired with
+        // nothing to reload on, and it never fires again on a content
+        // mutation — so reload here instead, or a refresh that really did move
+        // the totals would leave the page silently stale.
+        if (updated > 0 && !modal.open) {
+            location.reload();
+            return;
+        }
+        modal.dataset.reloadOnClose = updated > 0 ? '1' : '0';
+    });
+
+    window.openRefreshPricesModal = function () {
+        modal.dataset.reloadOnClose = '0';
+        body.innerHTML = '<div class="text-muted" style="font-size:13px; padding:8px 0">Refreshing&hellip;</div>';
+        modal.showModal();
+    };
+
+    // htmx does not swap on a non-2xx or a transport error, so without this
+    // the dialog would sit on "Refreshing…" forever with no signal that the
+    // run failed. Wired from the button's hx-on::response-error /
+    // hx-on::send-error so it is scoped to that request and cannot be tripped
+    // by the unrelated htmx traffic on the assets page. Static markup only —
+    // nothing server- or database-supplied is interpolated here.
+    window.refreshPricesFailed = function () {
+        modal.dataset.reloadOnClose = '0';
+        body.innerHTML =
+            '<div style="font-size:13px; padding:8px 0">' +
+            '<div class="text-negative" style="font-weight:600; margin-bottom:6px">Could not refresh prices.</div>' +
+            '<div class="text-muted">The market-data request failed. Nothing was changed — try again in a moment.</div>' +
+            '</div>';
+        if (!modal.open) modal.showModal();
+    };
+})();
+</script>

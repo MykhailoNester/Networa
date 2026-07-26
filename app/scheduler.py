@@ -14,7 +14,7 @@ than under ``app/services/``.
 
 import asyncio
 import contextlib
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from .services import currency_service, settings_service, snapshot_service
 
@@ -40,16 +40,57 @@ def parse_run_hour(raw: str) -> int:
 def should_run(last_run: str, now: datetime, run_hour: int) -> bool:
     """Whether the daily job should fire right now.
 
-    The whole policy, pure and directly unit-testable: the local calendar date
-    has advanced since the last run, and the clock has reached the configured
-    hour. An empty ``last_run`` (never run) fires as soon as the hour is
-    reached rather than waiting a full day, so turning the setting on at 09:00
-    runs promptly instead of waiting for tomorrow. This also gives free
-    catch-up after downtime: a container that was off overnight runs on the
-    next boot, which is what a self-hosted tracker wants, and needs no
-    wall-clock arithmetic that DST could break.
+    Pure and directly unit-testable. Four cases, checked in order:
+
+    - ``last_run`` is empty or not a parseable date (never run before) ->
+      run now.
+    - ``last_run`` is today -> already ran today, regardless of the hour ->
+      do not run.
+    - ``last_run`` is strictly earlier than yesterday -> at least one whole
+      day was missed while the app was off -> run *immediately*, whatever the
+      current hour, as a catch-up. Without this, ``run_hour=15`` and a 09:00
+      boot after three days offline would wait until 15:00 to notice, and an
+      app only ever up between 00:00 and its ``run_hour`` would never run at
+      all.
+    - ``last_run`` is yesterday -> the normal daily cadence: wait until the
+      clock reaches ``run_hour``.
+
+    A caught-up run still reprices everything as of *today* —
+    ``market_service.fetch_ticker_price`` returns a current quote, not a
+    historical one, so the missed days themselves are never backfilled. This
+    only guarantees the marker (and so the numbers) is never more than one
+    calendar day stale.
     """
-    return now.date().isoformat() != last_run and now.hour >= run_hour
+    today = now.date()
+    try:
+        last_run_date = date.fromisoformat(last_run)
+    except ValueError:
+        return True  # never run before, or an unparseable marker
+    if last_run_date >= today:
+        return False  # already ran today
+    if last_run_date < today - timedelta(days=1):
+        return True  # missed at least one whole day: catch up now
+    return now.hour >= run_hour  # last run was yesterday: normal cadence
+
+
+def next_run_at(last_run: str, now: datetime, run_hour: int) -> datetime:
+    """The wall-clock time the loop is next expected to fire, given the same
+    inputs ``should_run`` would see right now.
+
+    Display-only, for the Settings page — the loop itself only ever consults
+    ``should_run``; this never gates a run. Re-derives the same date
+    comparison ``should_run`` makes rather than inferring it from ``now.hour``:
+    a catch-up run can stamp ``last_run`` as today at any hour, including one
+    earlier than ``run_hour``, so "is today's hour still ahead of us" is not a
+    reliable stand-in for "did it already run today".
+    """
+    if should_run(last_run, now, run_hour):
+        return now  # a tick within TICK_SECONDS catches this
+    today_at_hour = now.replace(hour=run_hour, minute=0, second=0, microsecond=0)
+    last_run_date = date.fromisoformat(last_run)  # should_run already validated this
+    if last_run_date >= now.date():
+        return today_at_hour + timedelta(days=1)  # already ran today: wait for tomorrow
+    return today_at_hour  # ran yesterday; today's hour has not arrived yet
 
 
 async def is_enabled() -> bool:

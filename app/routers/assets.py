@@ -748,6 +748,12 @@ async def snapshot_add_auto(asset_id: int, request: Request):
             db, asset, snapshot_date
         )
         ticker_success = outcome["status"] == "updated"
+        if ticker_success:
+            # The dashboard's freshness line exists so staleness is never
+            # hidden, so it has to count this path too: pricing one asset here
+            # is still "a market price was fetched just now". Only on a real
+            # market hit — the NBU/stored-value fallback below is not one.
+            await snapshot_service.stamp_prices_refreshed()
 
     if not ticker_success:
         # Fall back to NBU exchange rate (for non-USD assets) or stored value

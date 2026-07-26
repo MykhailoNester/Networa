@@ -17,7 +17,10 @@ monkeypatching the module attribute is enough to intercept every call the
 service layer makes.
 """
 
+import asyncio
+import re
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +29,11 @@ from app import create_app, database, scheduler
 from app.config import settings
 from app.services import currency_service, market_service
 from app.services import snapshot_service as ss
+
+# The refresh modal's behaviour lives in the browser, so a few contracts below
+# are asserted against the template source itself — the closest this suite can
+# get to them without a headless browser.
+TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 
 
 @pytest.fixture
@@ -363,6 +371,28 @@ def test_refresh_on_an_empty_database_writes_nothing(on_fresh_db):
     assert report["outcomes"] == []
 
 
+def test_refresh_writes_the_prices_refreshed_at_setting_even_on_an_empty_db(
+    on_fresh_db,
+):
+    """The dashboard's freshness line needs this stamped on every call — the
+    manual button, the JSON API and the daily job all funnel through
+    refresh_all_prices — not just the ones that priced something. An empty
+    portfolio (no assets to price at all) is the boundary that would most
+    easily be skipped by mistake."""
+    from app.services import settings_service
+
+    async def body(db):
+        before = await settings_service.get_setting(ss.SETTING_PRICES_REFRESHED_AT, "")
+        await ss.refresh_all_prices()
+        after = await settings_service.get_setting(ss.SETTING_PRICES_REFRESHED_AT, "")
+        return before, after
+
+    before, after = on_fresh_db(body)
+
+    assert before == ""
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", after)
+
+
 def test_a_bare_crypto_ticker_prices_via_the_dash_usd_pair(on_fresh_db, monkeypatch):
     """End-to-end through refresh_all_prices, not just the resolve_symbol unit
     test: the report's `symbol` is what the fetch was actually asked for."""
@@ -655,11 +685,95 @@ def test_should_run_waits_for_the_hour_and_fires_once_a_day():
     assert scheduler.should_run("", day_advanced_at_hour, 3) is True
 
 
+def test_should_run_catches_up_immediately_after_missed_days():
+    """The exact regression this fix is for: run_hour=15, booting at 09:00
+    after three days offline used to evaluate `9 >= 15` as False and wait
+    until 15:00 instead of noticing right away."""
+    booted_at_nine = datetime(2026, 7, 26, 9, 0, tzinfo=UTC)
+    three_days_ago = "2026-07-23"
+
+    assert scheduler.should_run(three_days_ago, booted_at_nine, 15) is True
+
+    # Exactly one missed day (last run was the day before yesterday) is the
+    # same catch-up case, still regardless of the hour.
+    day_before_yesterday = "2026-07-24"
+    assert scheduler.should_run(day_before_yesterday, booted_at_nine, 15) is True
+
+    # An unparseable marker is treated the same as "never run before".
+    assert scheduler.should_run("not-a-date", booted_at_nine, 15) is True
+
+    # A container that is only ever up before its run_hour must still get a
+    # catch-up run once a whole day has actually been missed, not stay stuck
+    # forever just because "now" never reaches run_hour.
+    only_up_at_one_am = datetime(2026, 7, 26, 1, 0, tzinfo=UTC)
+    assert scheduler.should_run(three_days_ago, only_up_at_one_am, 15) is True
+
+
 def test_parse_run_hour_falls_back_to_the_default_when_unparseable():
     assert scheduler.parse_run_hour("25") == scheduler.DEFAULT_RUN_HOUR
     assert scheduler.parse_run_hour("abc") == scheduler.DEFAULT_RUN_HOUR
     assert scheduler.parse_run_hour("") == scheduler.DEFAULT_RUN_HOUR
     assert scheduler.parse_run_hour("0") == 0
+
+
+def test_next_run_at_agrees_with_should_run_across_the_same_cases():
+    run_hour = 15
+    now = datetime(2026, 7, 26, 9, 0, tzinfo=UTC)
+
+    # Never run before, or a missed day: due now, a tick away.
+    assert scheduler.next_run_at("", now, run_hour) == now
+    assert scheduler.next_run_at("2026-07-23", now, run_hour) == now
+
+    # Already ran today (however that happened, including a catch-up run
+    # earlier the same day before run_hour): tomorrow at run_hour, not today,
+    # even though now.hour (9) is still behind run_hour (15).
+    tomorrow_at_hour = datetime(2026, 7, 27, 15, 0, tzinfo=UTC)
+    assert scheduler.next_run_at("2026-07-26", now, run_hour) == tomorrow_at_hour
+
+    # Ran yesterday, hour not yet reached today: later today at run_hour.
+    today_at_hour = datetime(2026, 7, 26, 15, 0, tzinfo=UTC)
+    assert scheduler.next_run_at("2026-07-25", now, run_hour) == today_at_hour
+
+
+def test_the_loop_checks_before_its_first_sleep(monkeypatch):
+    """Enabling the schedule or booting the app must trigger the catch-up
+    check immediately — the fix in scheduler.should_run is useless if the
+    loop only calls it after already waiting out a full TICK_SECONDS."""
+    calls: list[str] = []
+
+    class _StopLoop(Exception):
+        pass
+
+    async def fake_is_enabled() -> bool:
+        calls.append("is_enabled")
+        return True
+
+    async def fake_get_setting(key: str, default: str = "") -> str:
+        return default  # empty last_run -> should_run() is True immediately
+
+    async def fake_set_setting(key: str, value: str) -> None:
+        calls.append("set_setting")
+
+    async def fake_run_once(price_date=None):
+        calls.append("run_once")
+        return {}
+
+    async def fake_sleep(seconds: float) -> None:
+        calls.append("sleep")
+        raise _StopLoop
+
+    monkeypatch.setattr(scheduler, "is_enabled", fake_is_enabled)
+    monkeypatch.setattr(scheduler, "run_once", fake_run_once)
+    monkeypatch.setattr(scheduler.settings_service, "get_setting", fake_get_setting)
+    monkeypatch.setattr(scheduler.settings_service, "set_setting", fake_set_setting)
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+
+    with pytest.raises(_StopLoop):
+        asyncio.run(scheduler._loop())
+
+    assert calls[0] == "is_enabled"
+    assert "run_once" in calls
+    assert calls.index("run_once") < calls.index("sleep")
 
 
 # --- scheduler: lifecycle wired through the app ---------------------------
@@ -747,6 +861,108 @@ def test_the_refresh_partial_escapes_a_hostile_ticker(fresh_client, monkeypatch)
     assert "&lt;img" in response.text
 
 
+def test_the_refresh_partial_carries_the_modal_reload_flag(fresh_client, monkeypatch):
+    """`data-updated` on the fragment's root is the only thing the modal's own
+    script (partials/refresh_prices_modal.html) reads to decide whether
+    closing the dialog must reload the page — this pins that contract."""
+
+    async def fake_fetch(symbol, price_date):
+        return (123.45, "USD")
+
+    monkeypatch.setattr(market_service, "fetch_ticker_price", fake_fetch)
+
+    fresh_client.post(
+        "/api/v1/assets",
+        json={
+            "name": "Index Fund",
+            "asset_class": "fund",
+            "value": 100,
+            "currency": "USD",
+            "ticker": "VTI",
+            "quantity": 10,
+        },
+    )
+
+    response = fresh_client.post("/prices/refresh")
+
+    assert response.status_code == 200
+    assert 'data-updated="1"' in response.text
+
+
+def test_the_refresh_partial_reports_no_reload_when_nothing_updated(
+    fresh_client, monkeypatch
+):
+    async def fake_fetch(symbol, price_date):
+        return None  # every ticker fails, nothing updates
+
+    monkeypatch.setattr(market_service, "fetch_ticker_price", fake_fetch)
+
+    fresh_client.post(
+        "/api/v1/assets",
+        json={
+            "name": "Checking",
+            "asset_class": "cash",
+            "value": 500,
+            "currency": "USD",
+        },
+    )
+
+    response = fresh_client.post("/prices/refresh")
+
+    assert response.status_code == 200
+    assert 'data-updated="0"' in response.text
+
+
+def test_the_dashboard_includes_the_refresh_prices_modal_not_the_old_inline_div(
+    fresh_client,
+):
+    response = fresh_client.get("/")
+
+    assert response.status_code == 200
+    assert 'id="refresh-prices-modal"' in response.text
+    assert 'id="refresh-prices-modal-body"' in response.text
+    assert 'id="refresh-prices-result"' not in response.text
+
+
+def test_the_assets_page_includes_the_refresh_prices_modal_not_the_old_inline_div(
+    fresh_client,
+):
+    response = fresh_client.get("/assets")
+
+    assert response.status_code == 200
+    assert 'id="refresh-prices-modal"' in response.text
+    assert 'id="refresh-prices-modal-body"' in response.text
+    assert 'id="refresh-prices-result"' not in response.text
+
+
+def test_dashboard_freshness_line_reflects_the_last_refresh(fresh_client, monkeypatch):
+    never = fresh_client.get("/")
+    assert never.status_code == 200
+    assert "Prices never refreshed" in never.text
+
+    async def fake_fetch(symbol, price_date):
+        return (10.0, "USD")
+
+    monkeypatch.setattr(market_service, "fetch_ticker_price", fake_fetch)
+    fresh_client.post(
+        "/api/v1/assets",
+        json={
+            "name": "Index Fund",
+            "asset_class": "fund",
+            "value": 100,
+            "currency": "USD",
+            "ticker": "VTI",
+            "quantity": 10,
+        },
+    )
+    refreshed = fresh_client.post("/prices/refresh")
+    assert refreshed.status_code == 200
+
+    after = fresh_client.get("/")
+    assert "Prices never refreshed" not in after.text
+    assert "Prices updated" in after.text
+
+
 def test_the_json_refresh_returns_the_report(fresh_client, monkeypatch):
     async def fake_fetch(symbol, price_date):
         return (50.0, "USD")
@@ -820,3 +1036,170 @@ def test_the_daily_run_endpoint_writes_the_history_row(fresh_client, monkeypatch
         body["history"]["total_assets_usd"] - body["history"]["total_debts_usd"]
     )
     assert body["history"]["total_debts_usd"] == pytest.approx(300)
+
+
+# --- Settings page -----------------------------------------------------
+
+
+def test_get_settings_renders_the_schedule_controls(fresh_client):
+    response = fresh_client.get("/settings")
+
+    assert response.status_code == 200
+    assert "Automatic Daily Valuation" in response.text
+    assert "Run at hour" in response.text
+    assert "Loop status" in response.text
+    assert "Next scheduled run" in response.text
+    assert "never" in response.text  # last_run, on a fresh database
+
+
+def test_dashboard_no_longer_shows_the_schedule_controls(fresh_client):
+    response = fresh_client.get("/")
+
+    assert response.status_code == 200
+    assert "Automatic Daily Valuation" not in response.text
+    assert "Run at hour" not in response.text
+
+
+def test_settings_post_bounces_back_to_the_settings_page(fresh_client, monkeypatch):
+    """`_safe_referer_path` echoes the posting page's own path, so a POST
+    issued from /settings must redirect back to /settings, not to "/"."""
+
+    async def fake_run_once(price_date=None):
+        return {}
+
+    monkeypatch.setattr(scheduler, "run_once", fake_run_once)
+
+    response = fresh_client.post(
+        "/settings/auto-valuation",
+        data={"enabled": "1", "run_hour": "4"},
+        headers={"referer": "http://testserver/settings"},
+    )
+
+    assert response.status_code == 200
+    assert str(response.url).rstrip("/").endswith("/settings")
+    assert "Automatic Daily Valuation" in response.text
+
+
+def test_saving_only_the_run_hour_does_not_switch_the_schedule_off(
+    fresh_client, monkeypatch
+):
+    """The On/Off control is a pair of named submit buttons, not a checkbox, so
+    a submit carrying only `run_hour` means "the hour changed", not "turn the
+    schedule off". Reading an absent field as "0" silently disabled the
+    schedule whenever someone edited the hour and saved.
+
+    Asserted through the "Next scheduled run" row rather than the On button's
+    markup: the buttons render their own name/value unconditionally, so only a
+    field derived from the stored flag can actually catch a regression here.
+    """
+
+    async def fake_run_once(price_date=None):
+        return {}
+
+    monkeypatch.setattr(scheduler, "run_once", fake_run_once)
+
+    fresh_client.post(
+        "/settings/auto-valuation", data={"enabled": "1", "run_hour": "15"}
+    )
+    assert "schedule is off" not in fresh_client.get("/settings").text
+
+    # Exactly what a browser submits when the Save button carries no name.
+    fresh_client.post("/settings/auto-valuation", data={"run_hour": "16"})
+
+    saved = fresh_client.get("/settings").text
+    assert "schedule is off" not in saved, (
+        "saving the hour alone turned the schedule off"
+    )
+    assert 'value="16"' in saved
+
+    # Leave no background loop running for the next test.
+    fresh_client.post(
+        "/settings/auto-valuation", data={"enabled": "0", "run_hour": "16"}
+    )
+
+
+def test_turning_the_schedule_off_still_works(fresh_client, monkeypatch):
+    """The absent-means-unchanged rule must not turn the Off button into a
+    no-op: Off submits an explicit enabled=0, and that has to win."""
+
+    async def fake_run_once(price_date=None):
+        return {}
+
+    monkeypatch.setattr(scheduler, "run_once", fake_run_once)
+
+    fresh_client.post(
+        "/settings/auto-valuation", data={"enabled": "1", "run_hour": "15"}
+    )
+    assert "schedule is off" not in fresh_client.get("/settings").text
+
+    fresh_client.post(
+        "/settings/auto-valuation", data={"enabled": "0", "run_hour": "15"}
+    )
+    assert "schedule is off" in fresh_client.get("/settings").text
+
+
+def test_the_modal_reloads_when_the_response_lands_after_it_was_closed():
+    """A batch reprices one ticker per network call, so it can run for seconds
+    and the user may dismiss the dialog first. `close` has already fired by
+    then and never fires again on a content mutation, so the afterSwap handler
+    must reload itself when the dialog is no longer open and something moved —
+    otherwise a refresh that really did change the totals leaves them stale."""
+    modal = (TEMPLATES / "partials" / "refresh_prices_modal.html").read_text()
+
+    assert "!modal.open" in modal
+    assert "location.reload()" in modal
+    normalised = " ".join(modal.split())
+    assert (
+        "if (updated > 0 && !modal.open) { location.reload(); return; }" in normalised
+    )
+
+
+def test_a_failed_refresh_reports_itself_instead_of_hanging_on_refreshing():
+    """htmx does not swap on a non-2xx or a transport error, so without an
+    explicit handler the dialog sits on the loading placeholder forever with no
+    signal that anything went wrong."""
+    modal = (TEMPLATES / "partials" / "refresh_prices_modal.html").read_text()
+    button = (TEMPLATES / "partials" / "refresh_prices_button.html").read_text()
+
+    assert "window.refreshPricesFailed" in modal
+    assert "Could not refresh prices." in modal
+    # Scoped to this button's own request, so the assets page's unrelated htmx
+    # traffic (inline value edits) cannot trip it.
+    assert 'hx-on::response-error="refreshPricesFailed()"' in button
+    assert 'hx-on::send-error="refreshPricesFailed()"' in button
+
+
+def test_the_per_asset_auto_button_also_stamps_the_freshness_line(
+    fresh_client, monkeypatch
+):
+    """The freshness indicator exists so staleness is never hidden, so pricing
+    a single asset through the per-asset "Auto" button has to count as well —
+    otherwise the dashboard still claims prices were never refreshed straight
+    after one was fetched."""
+
+    async def fake_fetch(symbol, price_date):
+        return (12.5, "USD")
+
+    monkeypatch.setattr(market_service, "fetch_ticker_price", fake_fetch)
+
+    assert "Prices never refreshed" in fresh_client.get("/").text
+
+    created = fresh_client.post(
+        "/api/v1/assets",
+        json={
+            "name": "Single Holding",
+            "asset_class": "fund",
+            "value": 100,
+            "currency": "USD",
+            "ticker": "VTI",
+            "quantity": 8,
+        },
+    )
+    asset_id = created.json()["id"]
+
+    # The per-asset button, NOT the batch refresh.
+    fresh_client.post(f"/assets/{asset_id}/snapshots/add-auto", data={})
+
+    after = fresh_client.get("/").text
+    assert "Prices never refreshed" not in after
+    assert "Prices updated" in after

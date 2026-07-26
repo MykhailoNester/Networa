@@ -1,12 +1,12 @@
 import json
 import math
 from collections.abc import Collection
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import aiosqlite
 
 from ..database import get_db
-from . import currency_service, market_service
+from . import currency_service, market_service, settings_service
 
 # Assets and debts share the `assets` table, told apart by `category`, and a
 # debt's value is stored positive — so anything meaning "net worth" signs debt
@@ -46,6 +46,26 @@ _PRICEABLE = """
 # Shared by the batch's SQL-filtered skip branch and revalue_asset_from_market's
 # own guard below, so both callers report a debt the identical way.
 _LIABILITY_SKIP_REASON = "liability — valued by balance, not by market price"
+
+# Written unconditionally by every refresh_all_prices call — the manual
+# button, the JSON API, and the daily job (run_daily_valuation calls this
+# function too) all funnel through here, so this is a single source for "when
+# did a refresh last run", not "when did something last change".
+SETTING_PRICES_REFRESHED_AT = "prices_last_refreshed_at"
+
+
+async def stamp_prices_refreshed() -> None:
+    """Record that a market price was fetched just now.
+
+    Lives here rather than at each call site so the batch refresh, the JSON
+    API, the daily job and the per-asset "Auto" button all write the one
+    format the dashboard's freshness line parses. Uses the same
+    ``datetime.now(tz=UTC).astimezone()`` basis as ``app/scheduler.py``.
+    """
+    await settings_service.set_setting(
+        SETTING_PRICES_REFRESHED_AT,
+        datetime.now(tz=UTC).astimezone().strftime("%Y-%m-%d %H:%M"),
+    )
 
 
 async def _get_net_worth_at_date(db, ref_date: str) -> float | None:
@@ -342,6 +362,13 @@ async def refresh_all_prices(price_date: str | None = None) -> dict:
                     currency=row["currency"] or "USD",
                 )
             )
+
+    # Stamped whether or not anything actually moved (an empty portfolio, or a
+    # run that only hit skips/failures, still counts as "a refresh happened
+    # just now") — this is the dashboard's only source for prices staleness,
+    # and a silent no-op refresh is exactly the case carry-forward would
+    # otherwise hide.
+    await stamp_prices_refreshed()
 
     return {
         "price_date": price_date,

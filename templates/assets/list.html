@@ -7,7 +7,7 @@
     <h1>Assets</h1>
     {% include "partials/refresh_prices_button.html" %}
 </div>
-<div id="refresh-prices-result" style="margin-bottom:16px"></div>
+{% include "partials/refresh_prices_modal.html" %}
 
 <!-- Sheet Summary Bar -->
 {% if sheets_with_totals %}

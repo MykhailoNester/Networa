@@ -1,58 +1,69 @@
 {# Jinja, autoescaped — every name/ticker/symbol/detail below comes straight
    out of the database (a form or a CSV import), so this partial is what keeps
-   a hostile ticker from rendering as markup. #}
-{% if not report.outcomes %}
-<div class="text-muted" style="font-size:13px; padding:8px 0">
-    No assets to price yet — add a ticker and a quantity to an asset.
-</div>
-{% else %}
-<div style="font-size:13px; margin-bottom:10px">
-    <strong>{{ report.updated }}</strong> updated ·
-    <strong>{{ report.failed }}</strong> failed ·
-    <strong>{{ report.skipped }}</strong> skipped
-    <span class="text-muted" style="margin-left:8px">as of {{ report.price_date }}</span>
-</div>
-
-{% set moved = report.outcomes | rejectattr('status', 'equalto', 'skipped') | list %}
-{% if moved %}
-<div style="display:flex; flex-direction:column; gap:2px; margin-bottom:10px">
-    {% for o in moved %}
-    <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; font-size:12px; padding:4px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
-        <span>
-            <span class="{% if o.status == 'updated' %}text-positive{% else %}text-negative{% endif %}" style="font-weight:600; text-transform:capitalize">{{ o.status }}</span>
-            {{ o.name }}
-            {% if o.symbol and o.symbol != o.ticker %}
-            <span class="text-muted mono" style="font-size:11px">({{ o.ticker }} → {{ o.symbol }})</span>
-            {% elif o.symbol %}
-            <span class="text-muted mono" style="font-size:11px">({{ o.symbol }})</span>
-            {% endif %}
-        </span>
-        <span class="text-muted mono" style="text-align:right; flex-shrink:0">
-            {% if o.value_usd is not none %}{{ o.value_usd | format_display }} · {% endif %}{{ o.detail }}
-        </span>
+   a hostile ticker from rendering as markup. It is swapped into
+   #refresh-prices-modal-body (partials/refresh_prices_modal.html), whose own
+   script reads data-updated on the root below to decide whether closing the
+   dialog must reload the page. #}
+<div data-updated="{{ report.updated }}">
+    {% if not report.outcomes %}
+    <div class="text-muted" style="font-size:13px; padding:8px 0">
+        No assets to price yet — add a ticker and a quantity to an asset.
     </div>
-    {% endfor %}
-</div>
-{% endif %}
+    {% else %}
+    <div style="font-size:13px; margin-bottom:10px">
+        <strong>{{ report.updated }}</strong> updated ·
+        <strong>{{ report.failed }}</strong> failed ·
+        <strong>{{ report.skipped }}</strong> skipped
+        <span class="text-muted" style="margin-left:8px">as of {{ report.price_date }}</span>
+    </div>
 
-{% set skipped = report.outcomes | selectattr('status', 'equalto', 'skipped') | list %}
-{% if skipped %}
-<details style="font-size:12px">
-    <summary class="text-muted" style="cursor:pointer">{{ skipped | length }} skipped — why</summary>
-    <div style="display:flex; flex-direction:column; gap:2px; margin-top:6px">
-        {% for o in skipped %}
-        <div style="display:flex; justify-content:space-between; gap:12px; color:var(--text-muted)">
-            <span>{{ o.name }}</span>
-            <span>{{ o.detail }}</span>
+    {% set moved = report.outcomes | rejectattr('status', 'equalto', 'skipped') | list %}
+    {% if moved %}
+    <div style="display:flex; flex-direction:column; gap:2px; margin-bottom:10px">
+        {% for o in moved %}
+        <div style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; font-size:12px; padding:4px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
+            <span>
+                <span class="{% if o.status == 'updated' %}text-positive{% else %}text-negative{% endif %}" style="font-weight:600; text-transform:capitalize">{{ o.status }}</span>
+                {{ o.name }}
+                {% if o.symbol and o.symbol != o.ticker %}
+                <span class="text-muted mono" style="font-size:11px">({{ o.ticker }} → {{ o.symbol }})</span>
+                {% elif o.symbol %}
+                <span class="text-muted mono" style="font-size:11px">({{ o.symbol }})</span>
+                {% endif %}
+            </span>
+            <span class="text-muted mono" style="text-align:right; flex-shrink:0">
+                {% if o.value_usd is not none %}{{ o.value_usd | format_display }} · {% endif %}{{ o.detail }}
+            </span>
         </div>
         {% endfor %}
     </div>
-</details>
-{% endif %}
+    {% endif %}
 
-{% if report.updated > 0 %}
-{# A reload, not an HX-Refresh header, so the summary above stays on screen
-   until the user chooses to see the totals redraw. #}
-<button type="button" class="btn btn-sm btn-secondary" style="margin-top:10px" onclick="location.reload()">Reload page</button>
-{% endif %}
-{% endif %}
+    {% set skipped = report.outcomes | selectattr('status', 'equalto', 'skipped') | list %}
+    {% if skipped %}
+    <details style="font-size:12px">
+        <summary class="text-muted" style="cursor:pointer">{{ skipped | length }} skipped — why</summary>
+        <div style="display:flex; flex-direction:column; gap:2px; margin-top:6px">
+            {% for o in skipped %}
+            <div style="display:flex; justify-content:space-between; gap:12px; color:var(--text-muted)">
+                <span>{{ o.name }}</span>
+                <span>{{ o.detail }}</span>
+            </div>
+            {% endfor %}
+        </div>
+    </details>
+    {% endif %}
+    {% endif %}
+
+    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border)">
+        <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('refresh-prices-modal').close()">Close</button>
+        {% if report.updated > 0 %}
+        {# A reload, not an HX-Refresh header, so the summary above stays on
+           screen until the user chooses to see the totals redraw — closing
+           the dialog by any other route reloads too (see
+           partials/refresh_prices_modal.html), this is just the explicit
+           shortcut. #}
+        <button type="button" class="btn btn-sm btn-primary" onclick="location.reload()">Reload page</button>
+        {% endif %}
+    </div>
+</div>
