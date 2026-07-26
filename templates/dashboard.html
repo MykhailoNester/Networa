@@ -47,23 +47,35 @@
 
 <!-- Period Returns Row -->
 {% if period_returns %}
+{# `change` is falsy for both "unknown" and "exactly zero": with nothing to
+   attribute, the contributor drill-through would open an empty modal. #}
 {% macro pct_card(label, val, change, period_key) %}
-<div class="card stat-card{% if val is not none %} bd-clickable{% endif %}"
-     {% if val is not none %}onclick="openBreakdown('/breakdown/period/{{ period_key }}', '{{ label }} Contributors')"{% endif %}>
+<div class="card stat-card{% if change %} bd-clickable{% endif %}"
+     {% if change %}onclick="openBreakdown('/breakdown/period/{{ period_key }}', '{{ label }} Contributors')"{% endif %}>
     <div class="label">{{ label }}</div>
     {% if val is not none %}
-    <div class="value {% if val >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:22px">
+    <div class="value {% if not change %}text-muted{% elif val >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:22px">
         {{ "%+.2f" | format(val) }}%
     </div>
-    {% if change is not none %}
+    {% if change %}
     <div class="change {% if change >= 0 %}text-positive{% else %}text-negative{% endif %}">
         {% if change >= 0 %}+{% endif %}{{ change | format_display }}
     </div>
+    {% else %}
+    <div class="change text-muted">no change</div>
     {% endif %}
-    <div class="bd-hint">↗ who contributed</div>
+    {% elif change is not none %}
+    {# Net worth was zero or negative at the reference date, so a percentage
+       would be meaningless — but the absolute change still is not. #}
+    <div class="value {% if not change %}text-muted{% elif change >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:22px">
+        {% if change >= 0 %}+{% endif %}{{ change | format_display }}
+    </div>
+    <div class="change text-muted">% n/a from a base of $0 or less</div>
     {% else %}
     <div class="value text-muted" style="font-size:16px">—</div>
+    <div class="change text-muted">no data this far back</div>
     {% endif %}
+    {% if change %}<div class="bd-hint">↗ who contributed</div>{% endif %}
 </div>
 {% endmacro %}
 <div class="cards-row" style="grid-template-columns: repeat(5, 1fr); margin-bottom: 24px">

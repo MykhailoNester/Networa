@@ -271,6 +271,38 @@ def test_percentages_are_withheld_when_the_reference_is_not_positive(on_fresh_db
     assert returns["all_time"] is None
 
 
+def test_a_flat_period_reads_as_zero_not_as_missing_data(on_fresh_db):
+    """Unchanged and "no history that far back" are different answers.
+
+    Collapsing both into None made the MTD and QTD cards show an em dash on a
+    portfolio whose newest snapshot was simply the one taken at the start of the
+    month — indistinguishable from having no history at all.
+    """
+
+    async def body(db):
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Fund', 'asset', 'fund', 50000, 50000)"
+        )
+        today = date.today()  # noqa: DTZ011 - matches the service's local-date basis
+        # Valued at the start of the month and untouched since: flat, not unknown.
+        await db.execute(
+            "INSERT INTO snapshots (snapshot_date, asset_id, value, currency, value_usd) "
+            "VALUES (?, 1, 50000, 'USD', 50000)",
+            (today.replace(day=1).isoformat(),),
+        )
+        await db.commit()
+        return await ss.get_period_returns()
+
+    returns = on_fresh_db(body)
+
+    assert returns["mtd"] == pytest.approx(0.0)
+    assert returns["mtd_change"] == pytest.approx(0.0)
+    # Nothing was snapshotted a year ago, so that period really is unknown.
+    assert returns["one_year"] is None
+    assert returns["one_year_change"] is None
+
+
 def test_returns_are_empty_for_an_empty_portfolio(on_fresh_db):
     assert on_fresh_db(lambda db: ss.get_period_returns()) == {}
 

@@ -329,7 +329,10 @@ async def get_period_returns(nw_data: dict | None = None) -> dict:
         return {}
 
     def pct(ref: float | None) -> float | None:
-        if ref is not None and ref > 0 and ref != current:
+        # Withheld only when unknowable: no snapshot on or before the date, or a
+        # base a ratio cannot describe. A period that happens to be flat is 0.0 —
+        # returning None there made "unchanged" render as "no data".
+        if ref is not None and ref > 0:
             return (current - ref) / ref * 100
         return None
 
