@@ -104,10 +104,8 @@ async def import_assets_csv(content: str) -> dict:
         if category not in ("asset", "debt"):
             category = "asset"
 
-        # Balances are stored as magnitudes; `category` alone carries the sign,
-        # and net worth subtracts debts. Exports from other tools commonly emit
-        # liabilities as negative numbers, which would otherwise be negated a
-        # second time on aggregation and *increase* net worth.
+        # Other tools export liabilities as negatives. Storing that sign would
+        # negate it again on aggregation and *raise* net worth.
         if category == "debt":
             value_amount = abs(value_amount)
 

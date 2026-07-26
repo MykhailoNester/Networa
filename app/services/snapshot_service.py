@@ -2,12 +2,31 @@ from datetime import date, timedelta
 
 from ..database import get_db
 
-# Net worth is assets MINUS debts. Both live in the `assets` table, told apart
-# by `category`, and a debt's value is stored as a positive number — so every
-# aggregate that means "net worth" has to sign debt rows with -1. Aggregates
-# that describe asset *composition* (allocation, investable, top holdings)
-# stay assets-only on purpose; mixing liabilities into them would be wrong.
+# Assets and debts share the `assets` table, told apart by `category`, and a
+# debt's value is stored positive — so anything meaning "net worth" signs debt
+# rows with -1, while anything describing asset *composition* stays assets-only.
 _SIGNED = "CASE WHEN a.category = 'debt' THEN -s.value_usd ELSE s.value_usd END"
+
+# The value each row was last known to have.
+_LATEST_PER_ASSET = """
+    SELECT asset_id, value_usd, snapshot_date
+    FROM snapshots
+    WHERE (asset_id, snapshot_date) IN (
+        SELECT asset_id, MAX(snapshot_date) FROM snapshots GROUP BY asset_id
+    )
+"""
+
+# The same, as of a reference date. Consumes one positional parameter — mind the
+# placeholder order when interpolating it alongside others.
+_LATEST_PER_ASSET_AS_OF = """
+    SELECT asset_id, value_usd, snapshot_date
+    FROM snapshots
+    WHERE (asset_id, snapshot_date) IN (
+        SELECT asset_id, MAX(snapshot_date)
+        FROM snapshots WHERE snapshot_date <= ?
+        GROUP BY asset_id
+    )
+"""
 
 
 async def _get_net_worth_at_date(db, ref_date: str) -> float | None:
@@ -23,15 +42,7 @@ async def _get_net_worth_at_date(db, ref_date: str) -> float | None:
         SELECT COUNT(*) AS rows_found,
                COALESCE(SUM({_SIGNED}), 0) AS total
         FROM assets a
-        JOIN (
-            SELECT asset_id, value_usd
-            FROM snapshots
-            WHERE (asset_id, snapshot_date) IN (
-                SELECT asset_id, MAX(snapshot_date)
-                FROM snapshots WHERE snapshot_date <= ?
-                GROUP BY asset_id
-            )
-        ) s ON a.id = s.asset_id
+        JOIN ({_LATEST_PER_ASSET_AS_OF}) s ON a.id = s.asset_id
         WHERE a.is_active = 1
     """,
         (ref_date,),
@@ -135,7 +146,6 @@ async def get_net_worth_history(
         date_filters += " AND s.snapshot_date <= ?"
         params.append(to_date)
 
-    # For each distinct snapshot date, sum the latest-known value per active row
     query = f"""
         WITH {_dates_cte(date_filters)},
         latest_as_of AS (
@@ -170,9 +180,7 @@ async def get_net_worth_history(
     cursor = await db.execute(query, params)
     rows = [dict(row) for row in await cursor.fetchall()]
 
-    # Investable breakdown per date (same as-of-date logic). Investable is an
-    # asset-side concept, so this half stays filtered to category='asset' —
-    # only the date list is shared with the net-worth series above.
+    # Investable is asset-side, so only the date list is shared with the series above.
     inv_query = f"""
         WITH {_dates_cte(date_filters)}
         SELECT
@@ -208,23 +216,14 @@ async def get_net_worth_history(
 async def get_current_net_worth() -> dict:
     db = await get_db()
 
-    # Latest snapshot value per active row (fallback to assets.value_usd if no snapshot)
-    cursor = await db.execute("""
+    cursor = await db.execute(f"""
         SELECT a.id, a.category, a.investable, a.sheet_id, a.asset_class, a.name,
                COALESCE(snap.value_usd, a.value_usd) as current_value_usd
         FROM assets a
-        LEFT JOIN (
-            SELECT asset_id, value_usd
-            FROM snapshots
-            WHERE (asset_id, snapshot_date) IN (
-                SELECT asset_id, MAX(snapshot_date) FROM snapshots GROUP BY asset_id
-            )
-        ) snap ON a.id = snap.asset_id
+        LEFT JOIN ({_LATEST_PER_ASSET}) snap ON a.id = snap.asset_id
         WHERE a.is_active = 1
     """)
     all_rows = list(await cursor.fetchall())
-    # The composition breakdowns below are asset-side views, so they iterate
-    # asset_rows; only the headline totals see debts.
     asset_rows = [row for row in all_rows if row["category"] != "debt"]
     debt_rows = [row for row in all_rows if row["category"] == "debt"]
 
@@ -282,7 +281,6 @@ async def get_current_net_worth() -> dict:
     assets_count = len(asset_rows)
     debts_count = len(debt_rows)
 
-    # Largest debts, for the dashboard liabilities card and its breakdown
     debts_by_name = {
         row["name"]: row["current_value_usd"] or 0
         for row in sorted(debt_rows, key=lambda r: -(r["current_value_usd"] or 0))
@@ -294,8 +292,7 @@ async def get_current_net_worth() -> dict:
     ytd_start = await _get_net_worth_at_date(db, f"{today.year}-01-01")
     if ytd_start is not None:
         ytd_change = net_worth - ytd_start
-        # A percentage against a zero or negative starting net worth is
-        # meaningless (and sign-flipped), so report the absolute change only.
+        # Against a zero or negative base a ratio is meaningless and sign-flipped.
         ytd_change_pct = (ytd_change / ytd_start) * 100 if ytd_start > 0 else None
     else:
         ytd_change = None
@@ -318,20 +315,20 @@ async def get_current_net_worth() -> dict:
     }
 
 
-async def get_period_returns() -> dict:
+async def get_period_returns(nw_data: dict | None = None) -> dict:
+    """Period returns on net worth. Pass an existing get_current_net_worth()
+    result to avoid recomputing the whole aggregate."""
     db = await get_db()
     today = date.today()  # noqa: DTZ011 - local calendar date
 
-    nw_data = await get_current_net_worth()
+    if nw_data is None:
+        nw_data = await get_current_net_worth()
     current = nw_data["net_worth"]
-    # Test the portfolio, not the total: with debts subtracted a net worth of
-    # zero is a legitimate figure, whereas an empty portfolio has no returns.
+    # Tests the portfolio, not the total: a net worth of zero is a real figure.
     if not nw_data["assets_count"] and not nw_data["debts_count"]:
         return {}
 
     def pct(ref: float | None) -> float | None:
-        # Only meaningful against a positive reference — see the ytd_change_pct
-        # note in get_current_net_worth().
         if ref is not None and ref > 0 and ref != current:
             return (current - ref) / ref * 100
         return None
@@ -385,23 +382,9 @@ async def get_top_movers(days: int = 30, limit: int = 5) -> list[dict]:
     ref_date = (date.today() - timedelta(days=days)).isoformat()  # noqa: DTZ011 - local calendar date
 
     cursor = await db.execute(
-        """
-        WITH latest AS (
-            SELECT asset_id, value_usd, snapshot_date
-            FROM snapshots
-            WHERE (asset_id, snapshot_date) IN (
-                SELECT asset_id, MAX(snapshot_date) FROM snapshots GROUP BY asset_id
-            )
-        ),
-        ref AS (
-            SELECT asset_id, value_usd, snapshot_date
-            FROM snapshots
-            WHERE (asset_id, snapshot_date) IN (
-                SELECT asset_id, MAX(snapshot_date)
-                FROM snapshots WHERE snapshot_date <= ?
-                GROUP BY asset_id
-            )
-        )
+        f"""
+        WITH latest AS ({_LATEST_PER_ASSET}),
+        ref AS ({_LATEST_PER_ASSET_AS_OF})
         SELECT
             a.name,
             a.category,
@@ -409,13 +392,11 @@ async def get_top_movers(days: int = 30, limit: int = 5) -> list[dict]:
             ref.value_usd     AS ref_val,
             latest.snapshot_date AS current_date,
             ref.snapshot_date    AS ref_date,
-            -- Movement in NET WORTH terms: a shrinking debt moves net worth up,
-            -- so a debt's contribution is the negation of its value change.
+            -- A shrinking debt moves net worth up, so debts negate.
             CASE WHEN a.category = 'debt'
                  THEN ref.value_usd - latest.value_usd
                  ELSE latest.value_usd - ref.value_usd END AS change_val,
-            -- Denominated by the magnitude of the reference value, so the sign
-            -- of the percentage matches the sign of change_val for debts too.
+            -- ABS denominator, so the percentage's sign follows change_val.
             CASE WHEN ref.value_usd != 0
                  THEN (CASE WHEN a.category = 'debt'
                             THEN ref.value_usd - latest.value_usd
@@ -468,31 +449,16 @@ async def get_period_contributors(period_key: str) -> list[dict]:
     if not ref_date:
         return []
 
-    cursor = await db.execute("""
+    cursor = await db.execute(f"""
         SELECT a.id, a.name, a.asset_class, a.category,
                COALESCE(snap.value_usd, a.value_usd) AS current_val
         FROM assets a
-        LEFT JOIN (
-            SELECT asset_id, value_usd FROM snapshots
-            WHERE (asset_id, snapshot_date) IN (
-                SELECT asset_id, MAX(snapshot_date) FROM snapshots GROUP BY asset_id
-            )
-        ) snap ON a.id = snap.asset_id
+        LEFT JOIN ({_LATEST_PER_ASSET}) snap ON a.id = snap.asset_id
         WHERE a.is_active = 1
     """)
     current_rows = {row["id"]: dict(row) for row in await cursor.fetchall()}
 
-    cursor = await db.execute(
-        """
-        SELECT asset_id, value_usd FROM snapshots
-        WHERE (asset_id, snapshot_date) IN (
-            SELECT asset_id, MAX(snapshot_date)
-            FROM snapshots WHERE snapshot_date <= ?
-            GROUP BY asset_id
-        )
-    """,
-        (ref_date,),
-    )
+    cursor = await db.execute(_LATEST_PER_ASSET_AS_OF, (ref_date,))
     ref_vals = {
         row["asset_id"]: float(row["value_usd"]) for row in await cursor.fetchall()
     }
@@ -503,9 +469,8 @@ async def get_period_contributors(period_key: str) -> list[dict]:
         current_val = float(asset["current_val"] or 0)
         ref_val = ref_vals.get(asset_id, 0)
         delta = current_val - ref_val
-        # Contribution to NET WORTH: paying a mortgage down shrinks the debt and
-        # so lifts net worth. Signing debts this way keeps the contributor list
-        # summing to the period's net-worth change.
+        # Negating debts is what makes these contributions sum to the period's
+        # net-worth change.
         change = -delta if is_debt else delta
         if abs(change) < 0.01:
             continue
@@ -528,20 +493,14 @@ async def get_period_contributors(period_key: str) -> list[dict]:
 
 
 async def get_top_assets_by_value(limit: int = 10) -> list[dict]:
-    """Largest holdings. Assets only — this is a composition view, so its
-    percentages are denominated by gross assets, not by net worth."""
+    """Largest holdings. Assets only, and denominated by gross assets."""
     db = await get_db()
     cursor = await db.execute(
-        """
+        f"""
         SELECT a.name, a.asset_class,
                COALESCE(snap.value_usd, a.value_usd) AS current_value_usd
         FROM assets a
-        LEFT JOIN (
-            SELECT asset_id, value_usd FROM snapshots
-            WHERE (asset_id, snapshot_date) IN (
-                SELECT asset_id, MAX(snapshot_date) FROM snapshots GROUP BY asset_id
-            )
-        ) snap ON a.id = snap.asset_id
+        LEFT JOIN ({_LATEST_PER_ASSET}) snap ON a.id = snap.asset_id
         WHERE a.is_active = 1 AND a.category = 'asset'
           AND COALESCE(snap.value_usd, a.value_usd) > 0
         ORDER BY current_value_usd DESC
@@ -553,10 +512,9 @@ async def get_top_assets_by_value(limit: int = 10) -> list[dict]:
 
 
 async def get_assets_by_class_summary() -> list[dict]:
-    """Asset allocation by class. Assets only, for the same reason as
-    get_top_assets_by_value() — liabilities are not an asset class."""
+    """Asset allocation by class. Assets only — a liability is not an asset class."""
     db = await get_db()
-    cursor = await db.execute("""
+    cursor = await db.execute(f"""
         SELECT
             COALESCE(a.asset_class, 'miscellaneous') AS asset_class,
             COALESCE(ac.display_name, a.asset_class, 'Misc') AS display_name,
@@ -565,12 +523,7 @@ async def get_assets_by_class_summary() -> list[dict]:
             SUM(COALESCE(snap.value_usd, a.value_usd)) AS total_value
         FROM assets a
         LEFT JOIN asset_classes ac ON ac.name = a.asset_class
-        LEFT JOIN (
-            SELECT asset_id, value_usd FROM snapshots
-            WHERE (asset_id, snapshot_date) IN (
-                SELECT asset_id, MAX(snapshot_date) FROM snapshots GROUP BY asset_id
-            )
-        ) snap ON a.id = snap.asset_id
+        LEFT JOIN ({_LATEST_PER_ASSET}) snap ON a.id = snap.asset_id
         WHERE a.is_active = 1 AND a.category = 'asset'
         GROUP BY a.asset_class
         ORDER BY total_value DESC

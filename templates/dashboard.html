@@ -45,20 +45,6 @@
     </div>
 </div>
 
-<!-- The balance-sheet identity, stated plainly: the headline number is derived. -->
-{% if data.total_debts > 0 %}
-<div class="card" style="margin-bottom:24px; display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; padding:14px 18px">
-    <span class="mono" style="font-size:15px; color:var(--text-secondary)">{{ data.total_assets | format_display }}</span>
-    <span class="text-muted" style="font-size:13px">assets</span>
-    <span class="text-muted" style="font-size:15px">−</span>
-    <span class="mono text-negative" style="font-size:15px">{{ data.total_debts | format_display }}</span>
-    <span class="text-muted" style="font-size:13px">debts</span>
-    <span class="text-muted" style="font-size:15px">=</span>
-    <span class="mono" style="font-size:17px; font-weight:700; color:var(--text-primary)">{{ data.net_worth | format_display }}</span>
-    <span class="text-muted" style="font-size:13px">net worth</span>
-</div>
-{% endif %}
-
 <!-- Period Returns Row -->
 {% if period_returns %}
 {% macro pct_card(label, val, change, period_key) %}
@@ -360,7 +346,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const displayMultiplier = {{ display_multiplier }};
     const displaySymbol = {{ display_symbol | tojson }};
 
-    // --- Net Worth History Chart ---
     const ctx = document.getElementById('netWorthChart');
     let netWorthChart = null;
 
@@ -407,7 +392,6 @@ document.addEventListener('DOMContentLoaded', function() {
             pointHoverBorderWidth: 2,
         }];
 
-        // Collect all investable types that appear across snapshots
         const allTypes = new Set();
         data.forEach(h => { if (h.investable_breakdown) Object.keys(h.investable_breakdown).forEach(t => allTypes.add(t)); });
 
@@ -496,7 +480,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- Allocation by Class Donut ---
     const classCtx = document.getElementById('allocationClassChart');
     if (classCtx) {
         const classData = {{ data.allocation_by_class | tojson }};
@@ -519,7 +502,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- Stacked Horizontal Bar by Sheet ---
     const sheetCtx = document.getElementById('sheetBarChart');
     if (sheetCtx) {
         const sheetData = {{ data.allocation_by_sheet | tojson }};
@@ -557,7 +539,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // Custom legend
         const legend = document.getElementById('sheet-legend');
         if (legend) {
             keys.forEach((k, i) => {

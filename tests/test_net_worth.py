@@ -5,22 +5,21 @@ rather than the presentation: the headline total, the trend series, and the
 per-line contributions all have to agree with each other and with the
 liabilities recorded in the database.
 
-Async service calls follow the ``asyncio.run`` pattern from test_sample_data.py
-(no pytest-asyncio); each body closes the shared connection before its event
-loop goes away, or a later test inherits an aiosqlite handle bound to a dead
-loop.
+``_run`` drives a body against the seeded demo copy; the ``on_fresh_db`` fixture
+in conftest.py drives one against an empty database, for the cases that need
+balances chosen to hit a specific boundary.
 """
 
 import asyncio
 from collections.abc import Callable, Coroutine
 from datetime import date, timedelta
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import create_app, database
 from app.config import settings
+from app.services import currency_service
 from app.services import snapshot_service as ss
 from app.services.import_service import import_assets_csv
 
@@ -37,21 +36,6 @@ def _run(body: Callable[[], Coroutine]):
         await database.init_db()
         try:
             return await body()
-        finally:
-            await database.close_db()
-
-    return asyncio.run(main())
-
-
-def _on_fresh_db(tmp_path, monkeypatch, body: Callable[[Any], Coroutine]):
-    """Run ``body(db)`` against a newly created, schema-only database."""
-    monkeypatch.setattr(settings, "DATABASE_PATH", tmp_path / "fresh.db")
-    monkeypatch.setattr(database, "_db", None)
-
-    async def main():
-        await database.init_db()
-        try:
-            return await body(await database.get_db())
         finally:
             await database.close_db()
 
@@ -111,7 +95,7 @@ def test_history_is_net_of_debts_and_ends_where_the_headline_does():
     assert history[-1]["net_worth_usd"] == pytest.approx(current["net_worth"])
 
 
-def test_history_keeps_dates_that_only_a_debt_moved(tmp_path, monkeypatch):
+def test_history_keeps_dates_that_only_a_debt_moved(on_fresh_db):
     """A date carrying only a debt snapshot is still a point on the curve."""
 
     async def body(db):
@@ -139,7 +123,7 @@ def test_history_keeps_dates_that_only_a_debt_moved(tmp_path, monkeypatch):
         await db.commit()
         return await ss.get_net_worth_history()
 
-    history = _on_fresh_db(tmp_path, monkeypatch, body)
+    history = on_fresh_db(body)
     dates = [point["snapshot_date"] for point in history]
 
     assert dates == ["2025-01-01", "2025-02-01"]
@@ -208,7 +192,7 @@ def test_history_matches_the_independently_seeded_totals():
             )
 
 
-def test_top_movers_signs_debts_by_net_worth_effect(tmp_path, monkeypatch):
+def test_top_movers_signs_debts_by_net_worth_effect(on_fresh_db):
     """Built on explicit dates: `days` is relative to today, so asserting
     against the demo dataset would start failing as its snapshots age out."""
 
@@ -243,7 +227,7 @@ def test_top_movers_signs_debts_by_net_worth_effect(tmp_path, monkeypatch):
         await db.commit()
         return await ss.get_top_movers(days=30, limit=10)
 
-    movers = {m["name"]: m for m in _on_fresh_db(tmp_path, monkeypatch, body)}
+    movers = {m["name"]: m for m in on_fresh_db(body)}
 
     assert set(movers) == {"Fund", "Mortgage"}
     assert movers["Fund"]["change_val"] == pytest.approx(10_000)
@@ -253,9 +237,7 @@ def test_top_movers_signs_debts_by_net_worth_effect(tmp_path, monkeypatch):
     assert movers["Fund"]["change_pct"] == pytest.approx(20.0)
 
 
-def test_percentages_are_withheld_when_the_reference_is_not_positive(
-    tmp_path, monkeypatch
-):
+def test_percentages_are_withheld_when_the_reference_is_not_positive(on_fresh_db):
     """Debts exceeding assets makes a ratio meaningless, not merely negative."""
 
     async def body(db):
@@ -281,7 +263,7 @@ def test_percentages_are_withheld_when_the_reference_is_not_positive(
         await db.commit()
         return await ss.get_current_net_worth(), await ss.get_period_returns()
 
-    current, returns = _on_fresh_db(tmp_path, monkeypatch, body)
+    current, returns = on_fresh_db(body)
 
     assert current["net_worth"] == pytest.approx(-10_000)
     # Absolute change is still reported; the percentage is not invented.
@@ -289,11 +271,146 @@ def test_percentages_are_withheld_when_the_reference_is_not_positive(
     assert returns["all_time"] is None
 
 
-def test_returns_are_empty_for_an_empty_portfolio(tmp_path, monkeypatch):
-    assert _on_fresh_db(tmp_path, monkeypatch, lambda db: ss.get_period_returns()) == {}
+def test_returns_are_empty_for_an_empty_portfolio(on_fresh_db):
+    assert on_fresh_db(lambda db: ss.get_period_returns()) == {}
 
 
-def test_imported_debts_are_stored_as_magnitudes(tmp_path, monkeypatch):
+def test_a_debt_in_another_currency_is_subtracted_in_usd(on_fresh_db):
+    """Aggregation happens in USD, so a foreign-currency balance has to be
+    converted before it is subtracted — not subtracted at face value."""
+    csv = (
+        "name,asset_class,category,value,currency\n"
+        "Flat,real_estate,asset,300000,USD\n"
+        "Euro Mortgage,real_estate,debt,100000,EUR\n"
+    )
+
+    async def body(db):
+        await currency_service.save_rate("EUR", "USD", 1.10, "2025-01-01")
+        await import_assets_csv(csv)
+        cursor = await db.execute(
+            "SELECT value, currency, value_usd FROM assets WHERE category = 'debt'"
+        )
+        return dict(await cursor.fetchone()), await ss.get_current_net_worth()
+
+    debt, current = on_fresh_db(body)
+
+    assert debt["value"] == pytest.approx(100_000)  # native amount preserved
+    assert debt["currency"] == "EUR"
+    assert debt["value_usd"] == pytest.approx(110_000)
+    assert current["total_debts"] == pytest.approx(110_000)
+    assert current["net_worth"] == pytest.approx(190_000)
+
+
+def test_a_net_worth_of_exactly_zero_is_a_figure_not_a_blank(on_fresh_db):
+    """Assets equal to debts is the boundary that a truthiness check gets wrong."""
+
+    async def body(db):
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Flat', 'asset', 'real_estate', 50000, 50000)"
+        )
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Mortgage', 'debt', 'real_estate', 50000, 50000)"
+        )
+        for asset_id in (1, 2):
+            await db.execute(
+                "INSERT INTO snapshots (snapshot_date, asset_id, value, currency, value_usd) "
+                "VALUES ('2025-01-01', ?, 50000, 'USD', 50000)",
+                (asset_id,),
+            )
+        await db.commit()
+        return (
+            await ss.get_current_net_worth(),
+            await ss.get_net_worth_history(),
+            await ss._get_net_worth_at_date(db, "2025-01-01"),
+        )
+
+    current, history, at_date = on_fresh_db(body)
+
+    assert current["net_worth"] == 0.0
+    assert history[-1]["net_worth_usd"] == 0.0
+    # None would mean "no data", which would blank the period cards instead.
+    assert at_date == 0.0
+
+
+def test_deactivating_a_debt_removes_it_from_net_worth(on_fresh_db):
+    """Deletion is a soft delete, so the aggregates must respect is_active."""
+
+    async def body(db):
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Flat', 'asset', 'real_estate', 100000, 100000)"
+        )
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Loan', 'debt', 'miscellaneous', 40000, 40000)"
+        )
+        await db.commit()
+        before = await ss.get_current_net_worth()
+        await db.execute("UPDATE assets SET is_active = 0 WHERE category = 'debt'")
+        await db.commit()
+        return before, await ss.get_current_net_worth()
+
+    before, after = on_fresh_db(body)
+
+    assert before["net_worth"] == pytest.approx(60_000)
+    assert after["net_worth"] == pytest.approx(100_000)
+    assert after["total_debts"] == 0
+    assert after["debts_count"] == 0
+
+
+def test_a_credit_balance_on_a_debt_raises_net_worth(on_fresh_db):
+    """A negative debt is a real thing — an escrow over-payment is money owed
+    back to you. Aggregation must not abs() it away."""
+
+    async def body(db):
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Flat', 'asset', 'real_estate', 100000, 100000)"
+        )
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Escrow', 'debt', 'miscellaneous', -400, -400)"
+        )
+        await db.commit()
+        return await ss.get_current_net_worth()
+
+    current = on_fresh_db(body)
+
+    assert current["total_debts"] == pytest.approx(-400)
+    assert current["net_worth"] == pytest.approx(100_400)
+
+
+def test_take_snapshot_records_debts_and_returns_net_worth(on_fresh_db):
+    """The endpoint used to freeze liability balances while assets advanced."""
+
+    async def body(db):
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Flat', 'asset', 'real_estate', 300000, 300000)"
+        )
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Mortgage', 'debt', 'real_estate', 120000, 120000)"
+        )
+        await db.commit()
+        result = await ss.take_snapshot("2025-03-01")
+        cursor = await db.execute(
+            "SELECT a.category FROM snapshots s JOIN assets a ON a.id = s.asset_id "
+            "WHERE s.snapshot_date = '2025-03-01'"
+        )
+        return result, sorted(row["category"] for row in await cursor.fetchall())
+
+    result, snapshotted = on_fresh_db(body)
+
+    assert snapshotted == ["asset", "debt"], "both categories must be snapshotted"
+    assert result["total_assets"] == pytest.approx(300_000)
+    assert result["total_debts"] == pytest.approx(120_000)
+    assert result["net_worth"] == pytest.approx(180_000)
+
+
+def test_imported_debts_are_stored_as_magnitudes(on_fresh_db):
     """Other tools export liabilities as negatives; storing that sign would
     negate it a second time on aggregation and *raise* net worth."""
     csv = (
@@ -310,7 +427,7 @@ def test_imported_debts_are_stored_as_magnitudes(tmp_path, monkeypatch):
         row = await cursor.fetchone()
         return dict(row), await ss.get_current_net_worth()
 
-    debt, current = _on_fresh_db(tmp_path, monkeypatch, body)
+    debt, current = on_fresh_db(body)
 
     assert debt["value"] == pytest.approx(200_000)
     assert debt["value_usd"] == pytest.approx(200_000)
@@ -342,6 +459,72 @@ def test_dashboard_api_reports_debts(client):
     assert payload["net_worth"] == pytest.approx(DEMO_NET)
     assert payload["total_debts"] == pytest.approx(DEMO_DEBTS)
     assert payload["debts_count"] == 2
+
+
+def test_debt_detail_page_hides_the_asset_only_controls(client):
+    """A liability has no cost basis, return, investable tier or tax on gain,
+    so those controls must not be offered — a no-op input invites bad data."""
+    debt = client.get("/assets/12")  # the demo Mortgage
+    asset = client.get("/assets/1")
+
+    assert debt.status_code == 200
+    assert "Debt Info" in debt.text
+    assert "Back to Debts" in debt.text
+    for absent in (
+        'data-tab="returns"',  # the whole RETURNS tab
+        "Investable Asset?",
+        "Taxable Asset?",
+        "Tax Estimate",
+        "Ticker Symbol",
+    ):
+        assert absent not in debt.text, f"{absent!r} should not render for a debt"
+    # Balance-flavoured labels replace the asset-flavoured ones.
+    assert "Current Balance" in debt.text
+    assert "Balance Over Time" in debt.text
+
+    # None of which is removed for a real asset.
+    assert asset.status_code == 200
+    assert 'data-tab="returns"' in asset.text
+    assert "Investable Asset?" in asset.text
+    assert "Current Value" in asset.text
+
+
+def test_history_card_appears_before_any_value_is_recorded(tmp_path, monkeypatch):
+    """A row with no snapshots still needs the history card and its add control,
+    or there is no way to record a first value. Uses its own empty database so
+    the shared demo copy's asset count stays intact for the other tests."""
+    monkeypatch.setattr(settings, "DATABASE_PATH", tmp_path / "empty.db")
+    monkeypatch.setattr(settings, "SEED_SAMPLE_DATA", False)
+    monkeypatch.setattr(database, "_db", None)
+
+    with TestClient(create_app(), follow_redirects=True) as fresh:
+        # value=0 creates the row without an initial snapshot.
+        page = fresh.post(
+            "/assets/create",
+            data={
+                "name": "Unvalued Flat",
+                "category": "asset",
+                "asset_class": "real_estate",
+                "value": "0",
+                "currency": "USD",
+            },
+        )
+
+    assert page.status_code == 200
+    assert 'id="value-history-table"' in page.text
+    assert "/snapshots/add" in page.text
+    # Exactly one, because HTMX swaps into #snap-tbody by id.
+    assert page.text.count('id="snap-tbody"') == 1
+    # No data yet, so no chart.
+    assert 'id="assetValueChart"' not in page.text
+
+
+def test_debt_detail_survives_a_stale_returns_tab_link(client):
+    """?tab=returns is reachable from old links and from the edit redirect."""
+    response = client.get("/assets/12?tab=returns")
+
+    assert response.status_code == 200
+    assert "Debt Info" in response.text
 
 
 def test_debts_api_returns_only_debts(client):

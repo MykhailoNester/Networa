@@ -10,28 +10,7 @@ loop goes away, or a later test would inherit an aiosqlite handle bound to a
 dead loop.
 """
 
-import asyncio
-from collections.abc import Callable, Coroutine
-from typing import Any
-
-from app import database
-from app.config import settings
 from app.services.sample_data import NOTE, maybe_seed_sample_data
-
-
-def _on_fresh_db(tmp_path, monkeypatch, body: Callable[[Any], Coroutine]):
-    """Run ``body(db)`` against a newly created, schema-only database."""
-    monkeypatch.setattr(settings, "DATABASE_PATH", tmp_path / "fresh.db")
-    monkeypatch.setattr(database, "_db", None)
-
-    async def main():
-        await database.init_db()
-        try:
-            return await body(await database.get_db())
-        finally:
-            await database.close_db()
-
-    return asyncio.run(main())
 
 
 async def _count(db, sql: str, params: tuple = ()) -> int:
@@ -40,7 +19,7 @@ async def _count(db, sql: str, params: tuple = ()) -> int:
     return row[0]
 
 
-def test_seeds_an_illustrative_portfolio(tmp_path, monkeypatch):
+def test_seeds_an_illustrative_portfolio(on_fresh_db):
     async def body(db):
         assert await maybe_seed_sample_data() > 0
         # Assets, and a debt too, so assets-minus-liabilities is representable.
@@ -56,10 +35,10 @@ def test_seeds_an_illustrative_portfolio(tmp_path, monkeypatch):
         # Sheets give the assets somewhere to live.
         assert await _count(db, "SELECT COUNT(*) FROM sheets") > 0
 
-    _on_fresh_db(tmp_path, monkeypatch, body)
+    on_fresh_db(body)
 
 
-def test_every_seeded_row_is_labelled(tmp_path, monkeypatch):
+def test_every_seeded_row_is_labelled(on_fresh_db):
     """The user must be able to tell which rows are safe to delete."""
 
     async def body(db):
@@ -71,10 +50,10 @@ def test_every_seeded_row_is_labelled(tmp_path, monkeypatch):
         )
         assert unlabelled == 0
 
-    _on_fresh_db(tmp_path, monkeypatch, body)
+    on_fresh_db(body)
 
 
-def test_does_not_touch_a_database_that_already_has_assets(tmp_path, monkeypatch):
+def test_does_not_touch_a_database_that_already_has_assets(on_fresh_db):
     async def body(db):
         await db.execute(
             """INSERT INTO assets (name, category, asset_class, value, value_usd)
@@ -87,10 +66,10 @@ def test_does_not_touch_a_database_that_already_has_assets(tmp_path, monkeypatch
         cursor = await db.execute("SELECT name FROM assets")
         assert [row["name"] for row in await cursor.fetchall()] == ["My real holding"]
 
-    _on_fresh_db(tmp_path, monkeypatch, body)
+    on_fresh_db(body)
 
 
-def test_is_idempotent(tmp_path, monkeypatch):
+def test_is_idempotent(on_fresh_db):
     async def body(db):
         first = await maybe_seed_sample_data()
         assert first > 0
@@ -98,10 +77,10 @@ def test_is_idempotent(tmp_path, monkeypatch):
         assert await maybe_seed_sample_data() == 0
         assert await _count(db, "SELECT COUNT(*) FROM assets") == first
 
-    _on_fresh_db(tmp_path, monkeypatch, body)
+    on_fresh_db(body)
 
 
-def test_seeded_values_are_positive_and_usd(tmp_path, monkeypatch):
+def test_seeded_values_are_positive_and_usd(on_fresh_db):
     async def body(db):
         await maybe_seed_sample_data()
         assert await _count(db, "SELECT COUNT(*) FROM assets WHERE value_usd <= 0") == 0
@@ -109,4 +88,4 @@ def test_seeded_values_are_positive_and_usd(tmp_path, monkeypatch):
             await _count(db, "SELECT COUNT(*) FROM assets WHERE currency != 'USD'") == 0
         )
 
-    _on_fresh_db(tmp_path, monkeypatch, body)
+    on_fresh_db(body)

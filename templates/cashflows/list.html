@@ -246,13 +246,11 @@
 
 {% block scripts %}
 <script>
-// Default flow date to today
 document.addEventListener('DOMContentLoaded', function () {
     var d = document.getElementById('cf-flow-date');
     if (d && !d.value) {
         d.value = new Date().toISOString().slice(0, 10);
     }
-    // Close modal on backdrop click
     document.getElementById('addCfModal').addEventListener('click', function(e) {
         if (e.target === this) this.style.display = 'none';
     });

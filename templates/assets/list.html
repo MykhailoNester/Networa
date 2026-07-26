@@ -236,7 +236,6 @@
 .sheet-tab:hover .sheet-delete-btn { visibility:visible !important; }
 </style>
 <script>
-// Asset classes that use cost basis (no ticker/quantity)
 var COST_BASIS_CLASSES = ['cash', 'real_estate', 'vehicle'];
 
 function onAssetClassChange(sel) {
@@ -255,7 +254,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('sectionNameInput').addEventListener('keydown', function(e) {
         if (e.key === 'Enter') createSection();
     });
-    // Init modal fields for default selection
     onAssetClassChange(document.getElementById('addAssetClass'));
 });
 

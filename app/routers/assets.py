@@ -177,7 +177,6 @@ async def asset_detail_page(request: Request, asset_id: int):
             "day_change": day_change,
             "alltime_change": alltime_change,
             "today": date.today().isoformat(),  # noqa: DTZ011 - local calendar date
-            # Debts reuse this page; keep the sidebar highlight on their own tab.
             "page": "debts" if asset.get("category") == "debt" else "assets",
         },
     )
@@ -400,7 +399,6 @@ def _value_cell_html(asset: dict) -> str:
     if asset.get("ticker"):
         qty = f" {asset['quantity']:,.0f}" if asset.get("quantity") else ""
         ticker_line = f'<div class="text-muted" style="font-size:11px; margin-top:2px">{e(asset["ticker"])}{qty}</div>'
-    # This fragment also swaps into the debts page, where balances read red.
     tone = " text-negative" if asset.get("category") == "debt" else ""
     return f"""<td id="value-cell-{aid}" class="text-right"
     hx-get="/assets/{aid}/inline-edit"
@@ -454,9 +452,12 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
             f"{sym}{(asset.get('value') or 0):,.0f} {e(asset['currency'])}</div>\n"
         )
 
+    # Keep in step with assets/detail.html, which hides both badges for debts.
+    is_debt = asset.get("category") == "debt"
+
     tax_html = ""
     estimated_tax = asset.get("estimated_tax")
-    if estimated_tax:
+    if estimated_tax and not is_debt:
         tax_html = (
             f'<span style="background: rgba(245,158,11,0.15); color: #f59e0b; '
             f'border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 600;">'
@@ -466,7 +467,7 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
     gain_html = ""
     gain_loss = asset.get("gain_loss")
     gain_loss_pct = asset.get("gain_loss_pct")
-    if gain_loss is not None:
+    if gain_loss is not None and not is_debt:
         g_cls = "text-positive" if gain_loss > 0 else "text-negative"
         pct_str = f" ({gain_loss_pct:+.1f}%)" if gain_loss_pct is not None else ""
         disp_gain = (gain_loss or 0) * disp_mult

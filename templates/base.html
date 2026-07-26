@@ -112,7 +112,6 @@
             sidebar.classList.contains('open') ? close() : open();
         });
         overlay.addEventListener('click', close);
-        // Close on nav link click (mobile UX)
         sidebar.querySelectorAll('a').forEach(function(a) {
             a.addEventListener('click', close);
         });

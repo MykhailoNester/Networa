@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
 from .. import templates
+from ..models import DashboardResponse
 from ..services import snapshot_service
 
 router = APIRouter()
@@ -11,7 +12,7 @@ router = APIRouter()
 async def dashboard_page(request: Request):
     data = await snapshot_service.get_current_net_worth()
     history = await snapshot_service.get_net_worth_history()
-    period_returns = await snapshot_service.get_period_returns()
+    period_returns = await snapshot_service.get_period_returns(data)
     top_movers = await snapshot_service.get_top_movers(days=30, limit=5)
 
     return templates.TemplateResponse(
@@ -28,7 +29,7 @@ async def dashboard_page(request: Request):
     )
 
 
-@router.get("/api/v1/dashboard")
+@router.get("/api/v1/dashboard", response_model=DashboardResponse)
 async def api_dashboard():
     return await snapshot_service.get_current_net_worth()
 
