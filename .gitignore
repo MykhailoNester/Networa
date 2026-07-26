@@ -27,9 +27,7 @@ data/*.db.bak*
 cashflow/
 reference/
 
-# Internal workflow / planning artifacts — not for the public repo
-team/
-.claude/agents/
+.claude/settings.json
 .claude/settings.local.json
 
 # IDE / editors
