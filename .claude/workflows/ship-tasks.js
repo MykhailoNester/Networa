@@ -16,25 +16,43 @@ export const meta = {
    write-back) are NOT here — they belong to the caller. This script starts at an
    already-resolved task list and ends at committed branches. */
 
+/* The Workflow tool sometimes flattens `args` to a JSON string before the
+   script sees it, in which case `args.repo` is undefined on a string primitive
+   and the guard below rejects a run whose arguments were in fact perfectly
+   correct. Parsing that back is not guessing — it is the same payload in a
+   different wrapper — so accept it rather than making the caller wrap this
+   script just to hand it an object. A bound local, not a reassignment: `args`
+   is runtime-provided and may not be writable. */
+const input = typeof args === 'string' ? tryParse(args) : args
+
+function tryParse(raw) {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null // fall through to the guard, which reports it properly
+  }
+}
+
 /* A workflow script has no filesystem access: it cannot read
    .claude/pipeline.env and cannot derive the repo root from git. The caller
    resolves both in the constants block of .claude/agents/dev-orchestrator.md and
    passes them in. Fail loudly rather than guess — a default here would bake
    somebody's home directory into a public repository. */
-if (!args || !args.repo || !args.wtRoot) {
+if (!input || !input.repo || !input.wtRoot) {
   throw new Error(
     'ship-tasks: args.repo and args.wtRoot are required absolute paths, resolved by the caller. ' +
+      `Received ${typeof args}${typeof args === 'string' ? ' (unparseable as JSON)' : ''}. ` +
       'See the Modes section of .claude/agents/dev-orchestrator.md.',
   )
 }
 
-const REPO = args.repo
-const WT_ROOT = args.wtRoot
-const TASKS = args.tasks || []
+const REPO = input.repo
+const WT_ROOT = input.wtRoot
+const TASKS = input.tasks || []
 
 if (TASKS.length === 0) throw new Error('ship-tasks: args.tasks is empty — nothing to deliver.')
 
-const LIMITS = args.limits || {}
+const LIMITS = input.limits || {}
 const MAX_PLAN_REVISIONS = LIMITS.planRevisions ?? 2
 const MAX_REVIEW_FIXES = LIMITS.reviewFixes ?? 2
 const MAX_GATE_FIXES = LIMITS.gateFixes ?? 2

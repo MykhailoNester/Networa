@@ -320,9 +320,30 @@ will clobber each other.
 | `worktree remove` refused | Fail task at teardown. Branch has the commit; worktree kept. Report what is uncommitted. |
 | Target branch already exists | Fail task at preflight, before any worktree. |
 | A chained task's predecessor failed | Skip it, status SKIPPED (blocked by ...). Its base doesn't exist in a usable state. |
+| The run itself dies mid-stage (process exit, kill) | Resume by hand — see below. Do **not** re-run the pipeline from Stage 1. |
 
 Failed tasks get **no** doc write-back. Always finish the other tasks in the
 wave before reporting.
+
+### Resuming a run that died mid-stage
+
+A killed run leaves the worktree and `$ART` exactly as they were — that is what
+they are outside the repo for. Recover from them rather than starting over:
+
+1. `git -C "$WT" status` and `ls "$ART"` tell you how far it got. `plan.md` plus
+   a `plan-review-*.md` saying APPROVED means Stages 2–3 are **done** and must
+   not be repeated; an uncommitted diff means Stage 4 got at least partway.
+2. Re-run only the stages still outstanding, as direct subagent calls, in the
+   normal order. Stage 5 re-reviews whatever is in the worktree, so a
+   half-finished Stage 4 is caught there rather than needing a rebuild.
+3. Round limits count the rounds *actually run*, not the ones lost with the
+   process.
+
+**Workflow mode cannot be resumed across a process exit.** `resumeFromRunId`
+keys its cache to the session's transcript directory, so a new session finds
+nothing to replay, re-runs Stage 1, and hard-stops on the branch it created
+before dying. That hard stop is correct — do not weaken it, and do not delete
+the branch to get past it. Finish the run by hand instead.
 
 ## Final report
 
@@ -371,6 +392,17 @@ A workflow script has **no filesystem access**, so it cannot read
 **required** and must be the values you resolved in the constants block. The
 script rejects the run if either is missing rather than guessing. Pass the
 resolved round limits in `limits` too; it falls back to 2 apiece.
+
+**If it fails instantly with `args.repo and args.wtRoot are required`, read the
+error's `Received …` clause before touching your arguments.** The Workflow tool
+sometimes flattens `args` into a JSON string, and `args.repo` on a string is
+`undefined` however correct the payload was — the run then dies in milliseconds
+with no transcript directory, which is the tell. `ship-tasks.js` parses a
+stringified `args` back into an object, so this should now just work; `Received
+object` means the paths really are missing, and `Received string (unparseable as
+JSON)` means the payload itself is malformed. Passing an object from inside JS —
+`workflow({scriptPath}, {...})` from a wrapper script — sidesteps the tool
+boundary entirely if you ever need it.
 
 Stage 0 still happens here first — the script does not resolve the plan doc — and
 Stage 9 still happens here afterwards, from the script's return value. Same
