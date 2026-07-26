@@ -29,6 +29,8 @@ reference/
 
 .claude/settings.json
 .claude/settings.local.json
+# Machine-specific paths for the /ship pipeline; .example is committed instead
+.claude/pipeline.env
 
 # IDE / editors
 .idea/
