@@ -4,7 +4,9 @@
 {% block content %}
 <div class="page-header">
     <h1>Net Worth Overview</h1>
+    {% include "partials/refresh_prices_button.html" %}
 </div>
+<div id="refresh-prices-result" style="margin-bottom:16px"></div>
 
 <!-- Summary Cards -->
 <div class="cards-row" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))">
@@ -43,6 +45,35 @@
         </div>
         <div class="bd-hint">↗ breakdown</div>
     </div>
+</div>
+
+<!-- Automatic Daily Valuation -->
+{# Carry-forward hides staleness, so this card says outright when prices were
+   last refreshed and lets the daily schedule be turned on without a restart. #}
+<div class="card" style="margin-bottom:24px">
+    <h3 style="font-size:13px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px">
+        Automatic Daily Valuation
+    </h3>
+    <form method="post" action="/settings/auto-valuation" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap">
+        <div style="display:flex; gap:4px">
+            <button type="submit" name="enabled" value="1"
+                    style="padding:5px 14px; font-size:12px; font-weight:600; border-radius:4px; border:1px solid var(--border); cursor:pointer;
+                           background:{% if auto_valuation.enabled %}var(--accent){% else %}var(--bg-secondary){% endif %};
+                           color:{% if auto_valuation.enabled %}#fff{% else %}var(--text-secondary){% endif %};">On</button>
+            <button type="submit" name="enabled" value="0"
+                    style="padding:5px 14px; font-size:12px; font-weight:600; border-radius:4px; border:1px solid var(--border); cursor:pointer;
+                           background:{% if not auto_valuation.enabled %}var(--accent){% else %}var(--bg-secondary){% endif %};
+                           color:{% if not auto_valuation.enabled %}#fff{% else %}var(--text-secondary){% endif %};">Off</button>
+        </div>
+        <label style="font-size:12px; color:var(--text-secondary); display:flex; align-items:center; gap:6px">
+            Run at hour (0–23)
+            <input type="number" name="run_hour" min="0" max="23" value="{{ auto_valuation.run_hour }}"
+                   style="width:56px; padding:4px 6px; font-size:12px; border-radius:4px; border:1px solid var(--border); background:var(--bg-secondary); color:var(--text-primary);">
+        </label>
+        <span class="text-muted" style="font-size:12px">
+            Last automatic run: {{ auto_valuation.last_run or 'never' }}
+        </span>
+    </form>
 </div>
 
 <!-- Period Returns Row -->

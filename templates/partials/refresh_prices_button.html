@@ -1,0 +1,10 @@
+{# Included by both the dashboard and the assets page so the markup — and the
+   hx-target it points at — cannot drift between the two. #}
+<button class="btn btn-sm btn-secondary"
+        hx-post="/prices/refresh"
+        hx-target="#refresh-prices-result"
+        hx-swap="innerHTML"
+        hx-disabled-elt="this"
+        title="Fetch the latest market price for every asset with a ticker and a quantity">
+    Refresh prices
+</button>

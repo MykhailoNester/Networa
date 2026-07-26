@@ -725,7 +725,7 @@ async def snapshot_delete(asset_id: int, snapshot_id: int):
 async def snapshot_add_auto(asset_id: int, request: Request):
     """Add a snapshot using market price (for ticker assets) or NBU exchange rate."""
     from ..database import get_db
-    from ..services import currency_service, market_service
+    from ..services import currency_service, snapshot_service
 
     form = await request.form()
     snapshot_date = get_str(form, "snapshot_date") or date.today().isoformat()  # noqa: DTZ011 - local calendar date
@@ -743,38 +743,11 @@ async def snapshot_add_auto(asset_id: int, request: Request):
     ticker_success = False
 
     if ticker and quantity:
-        price_data = await market_service.fetch_ticker_price(ticker, snapshot_date)
-        if price_data is not None:
-            price, price_currency = price_data
-
-            price_in_usd = await currency_service.convert_to_usd(price, price_currency)
-            value_usd = round(price_in_usd * quantity, 2)
-
-            if asset_currency == "USD":
-                value_native = value_usd
-                price_native = price_in_usd
-            else:
-                rate = await currency_service.get_rate(asset_currency, "USD")
-                value_native = round(value_usd / rate, 4) if rate else value_usd
-                price_native = (
-                    price
-                    if price_currency == asset_currency
-                    else (round(price_in_usd / rate, 6) if rate else price_in_usd)
-                )
-
-            await db.execute(
-                """UPDATE assets SET price = ?, price_currency = ?, value = ?, value_usd = ?,
-                   updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
-                (price_native, asset_currency, value_native, value_usd, asset_id),
-            )
-            await db.execute(
-                """INSERT OR REPLACE INTO snapshots
-                   (snapshot_date, asset_id, value, currency, value_usd)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (snapshot_date, asset_id, value_native, asset_currency, value_usd),
-            )
-            await db.commit()
-            ticker_success = True
+        # Shared with the batch "Refresh prices" action (snapshot_service).
+        outcome = await snapshot_service.revalue_asset_from_market(
+            db, asset, snapshot_date
+        )
+        ticker_success = outcome["status"] == "updated"
 
     if not ticker_success:
         # Fall back to NBU exchange rate (for non-USD assets) or stored value

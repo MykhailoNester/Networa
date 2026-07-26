@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from .. import templates
+from .. import scheduler, templates
 from ..models import DashboardResponse
-from ..services import snapshot_service
+from ..services import settings_service, snapshot_service
 
 router = APIRouter()
 
@@ -14,6 +14,16 @@ async def dashboard_page(request: Request):
     history = await snapshot_service.get_net_worth_history()
     period_returns = await snapshot_service.get_period_returns(data)
     top_movers = await snapshot_service.get_top_movers(days=30, limit=5)
+    # Display only — three settings reads, no arithmetic. Answers "when were
+    # prices last refreshed automatically", which carry-forward otherwise hides.
+    auto_valuation = {
+        "enabled": await settings_service.get_setting(scheduler.SETTING_ENABLED, "0")
+        == "1",
+        "run_hour": scheduler.parse_run_hour(
+            await settings_service.get_setting(scheduler.SETTING_RUN_HOUR, "")
+        ),
+        "last_run": await settings_service.get_setting(scheduler.SETTING_LAST_RUN, ""),
+    }
 
     return templates.TemplateResponse(
         request,
@@ -24,6 +34,7 @@ async def dashboard_page(request: Request):
             "history": history,
             "period_returns": period_returns,
             "top_movers": top_movers,
+            "auto_valuation": auto_valuation,
             "page": "dashboard",
         },
     )
