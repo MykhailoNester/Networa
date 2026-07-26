@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from . import scheduler
 from .config import settings
 from .database import close_db, init_db
 from .security import AllowedHostMiddleware, SameOriginMiddleware
@@ -29,8 +30,16 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
             )
     await currency_service.reload_display_state()
     _sync_display_globals()
+    # Opt-in: a default boot starts no background task at all (see
+    # app/scheduler.py). Toggling the setting later starts/stops it directly,
+    # without a restart, from app/routers/settings.py.
+    if await scheduler.is_enabled():
+        await scheduler.start()
     yield
-    # Shutdown
+    # Shutdown. Stopping the scheduler before close_db() is load-bearing: a
+    # tick that woke up after the connection closed would call get_db() and
+    # resurrect one on a dying event loop.
+    await scheduler.stop()
     await close_db()
 
 
@@ -74,6 +83,7 @@ def create_app() -> FastAPI:
         debts,
         exchange_rates,
         import_data,
+        prices,
         sheets,
         snapshots,
     )
@@ -85,6 +95,7 @@ def create_app() -> FastAPI:
     app.include_router(sheets.router)
     app.include_router(cashflows.router)
     app.include_router(snapshots.router)
+    app.include_router(prices.router)
     app.include_router(import_data.router)
     app.include_router(exchange_rates.router)
     app.include_router(settings_router.router)

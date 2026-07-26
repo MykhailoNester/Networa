@@ -1,6 +1,12 @@
-from datetime import date, timedelta
+import json
+import math
+from collections.abc import Collection
+from datetime import UTC, date, datetime, timedelta
+
+import aiosqlite
 
 from ..database import get_db
+from . import currency_service, market_service, settings_service
 
 # Assets and debts share the `assets` table, told apart by `category`, and a
 # debt's value is stored positive — so anything meaning "net worth" signs debt
@@ -27,6 +33,39 @@ _LATEST_PER_ASSET_AS_OF = """
         GROUP BY asset_id
     )
 """
+
+# Rows the price path may touch: an active *asset* (never a debt — a
+# liability's balance is an amortisation schedule, not quantity x market
+# price) carrying both a ticker and a non-zero quantity.
+_PRICEABLE = """
+    a.is_active = 1 AND a.category = 'asset'
+    AND a.ticker IS NOT NULL AND TRIM(a.ticker) <> ''
+    AND a.quantity IS NOT NULL AND a.quantity <> 0
+"""
+
+# Shared by the batch's SQL-filtered skip branch and revalue_asset_from_market's
+# own guard below, so both callers report a debt the identical way.
+_LIABILITY_SKIP_REASON = "liability — valued by balance, not by market price"
+
+# Written unconditionally by every refresh_all_prices call — the manual
+# button, the JSON API, and the daily job (run_daily_valuation calls this
+# function too) all funnel through here, so this is a single source for "when
+# did a refresh last run", not "when did something last change".
+SETTING_PRICES_REFRESHED_AT = "prices_last_refreshed_at"
+
+
+async def stamp_prices_refreshed() -> None:
+    """Record that a market price was fetched just now.
+
+    Lives here rather than at each call site so the batch refresh, the JSON
+    API, the daily job and the per-asset "Auto" button all write the one
+    format the dashboard's freshness line parses. Uses the same
+    ``datetime.now(tz=UTC).astimezone()`` basis as ``app/scheduler.py``.
+    """
+    await settings_service.set_setting(
+        SETTING_PRICES_REFRESHED_AT,
+        datetime.now(tz=UTC).astimezone().strftime("%Y-%m-%d %H:%M"),
+    )
 
 
 async def _get_net_worth_at_date(db, ref_date: str) -> float | None:
@@ -103,6 +142,416 @@ async def take_snapshot(snapshot_date: str | None = None) -> dict:
         "total_assets": total_assets,
         "total_debts": total_debts,
         "net_worth": total_assets - total_debts,
+    }
+
+
+def _price_outcome(
+    asset_id: int,
+    name: str,
+    ticker: str,
+    symbol: str | None,
+    status: str,
+    detail: str,
+    *,
+    source: str = "market",
+    value_usd: float | None = None,
+    value_native: float | None = None,
+    currency: str = "USD",
+) -> dict:
+    """Shape shared by every per-asset outcome the price and FX passes report."""
+    return {
+        "asset_id": asset_id,
+        "name": name,
+        "ticker": ticker,
+        "symbol": symbol,
+        "status": status,
+        "source": source,
+        "detail": detail,
+        "value_usd": value_usd,
+        "value_native": value_native,
+        "currency": currency,
+    }
+
+
+async def revalue_asset_from_market(
+    db: aiosqlite.Connection, asset: dict, price_date: str
+) -> dict:
+    """Reprice one ticker-bearing asset and write its snapshot + cache.
+
+    Behaviour-preserving lift of the market-price branch that used to live in
+    ``app/routers/assets.py``'s add-auto handler, so both the manual button and
+    the batch share one implementation. Writes and commits immediately — one
+    asset per transaction — so the fetch above never leaves an open write for
+    the next asset's network call to wait behind.
+    """
+    asset_id = asset["id"]
+    name = asset["name"]
+    ticker = (asset["ticker"] or "").strip()
+    quantity = asset["quantity"]
+    asset_currency = asset["currency"] or "USD"
+
+    if asset.get("category") == "debt":
+        # The batch's _PRICEABLE SQL filter already keeps a debt row out of the
+        # loop that calls this function, but the manual per-asset "Auto" button
+        # (app/routers/assets.py's snapshot_add_auto) has no such filter and can
+        # reach a debt directly — e.g. one given a ticker/quantity via CSV
+        # import. The guard has to live here too so the invariant holds for
+        # both callers, not just the batch.
+        return _price_outcome(
+            asset_id,
+            name,
+            ticker,
+            ticker or None,
+            "skipped",
+            _LIABILITY_SKIP_REASON,
+            currency=asset_currency,
+        )
+
+    symbol = market_service.resolve_symbol(ticker, asset.get("asset_class"))
+
+    try:
+        price_data = await market_service.fetch_ticker_price(symbol, price_date)
+        if price_data is None and symbol != ticker:
+            # A crypto-flavoured ticker that is really an equity (GBTC) has no
+            # -USD pair; retry with what the user actually typed.
+            retry_data = await market_service.fetch_ticker_price(ticker, price_date)
+            if retry_data is not None:
+                symbol = ticker
+                price_data = retry_data
+
+        if price_data is None:
+            return _price_outcome(
+                asset_id,
+                name,
+                ticker,
+                symbol,
+                "failed",
+                f"no price returned for {symbol}",
+                currency=asset_currency,
+            )
+
+        price, price_currency = price_data
+        # A delisted ticker returning 0 (or a negative/NaN) must not overwrite a
+        # real holding with a zero snapshot — leave the previous value alone.
+        if not math.isfinite(price) or price <= 0:
+            return _price_outcome(
+                asset_id,
+                name,
+                ticker,
+                symbol,
+                "failed",
+                f"non-positive price from {symbol}",
+                currency=asset_currency,
+            )
+
+        price_in_usd = await currency_service.convert_to_usd(price, price_currency)
+        value_usd = round(price_in_usd * quantity, 2)
+
+        if asset_currency == "USD":
+            value_native = value_usd
+            price_native = price_in_usd
+        else:
+            rate = await currency_service.get_rate(asset_currency, "USD")
+            value_native = round(value_usd / rate, 4) if rate else value_usd
+            price_native = (
+                price
+                if price_currency == asset_currency
+                else (round(price_in_usd / rate, 6) if rate else price_in_usd)
+            )
+
+        await db.execute(
+            """UPDATE assets SET price = ?, price_currency = ?, value = ?, value_usd = ?,
+               updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (price_native, asset_currency, value_native, value_usd, asset_id),
+        )
+        await db.execute(
+            """INSERT OR REPLACE INTO snapshots
+               (snapshot_date, asset_id, value, currency, value_usd)
+               VALUES (?, ?, ?, ?, ?)""",
+            (price_date, asset_id, value_native, asset_currency, value_usd),
+        )
+        await db.commit()
+
+        return _price_outcome(
+            asset_id,
+            name,
+            ticker,
+            symbol,
+            "updated",
+            f"{symbol} @ {price_in_usd:.4f} USD",
+            value_usd=value_usd,
+            value_native=value_native,
+            currency=asset_currency,
+        )
+    except Exception as exc:  # noqa: BLE001 - one bad row must not abort a batch
+        # Same pattern as take_snapshot above: a failure between the UPDATE and
+        # the commit must not leave a dangling write on the shared connection
+        # for the next asset's commit() in the batch loop to silently flush.
+        await db.rollback()
+        return _price_outcome(
+            asset_id,
+            name,
+            ticker,
+            symbol,
+            "failed",
+            f"{type(exc).__name__}: {exc}",
+            currency=asset_currency,
+        )
+
+
+async def refresh_all_prices(price_date: str | None = None) -> dict:
+    """Reprice every active, ticker-and-quantity-bearing asset.
+
+    Writes only ``snapshots`` and the ``assets`` price/value cache, and never
+    for a ``category = 'debt'`` row — a liability's balance is not
+    ``quantity x market price``. USD is the denomination of every ``value_usd``
+    in the report. One failing ticker is reported ``failed`` and does not stop
+    the rest of the run.
+    """
+    db = await get_db()
+    if not price_date:
+        price_date = date.today().isoformat()  # noqa: DTZ011 - local calendar date
+
+    cursor = await db.execute(f"""
+        SELECT a.id, a.name, a.category, a.ticker, a.quantity, a.currency, a.asset_class,
+               CASE WHEN {_PRICEABLE} THEN 1 ELSE 0 END AS priceable
+        FROM assets a
+        WHERE a.is_active = 1
+        ORDER BY a.id
+    """)
+    rows = [dict(row) for row in await cursor.fetchall()]
+
+    outcomes = []
+    for row in rows:
+        ticker = (row["ticker"] or "").strip()
+        if row["priceable"]:
+            outcomes.append(await revalue_asset_from_market(db, row, price_date))
+        elif row["category"] == "debt":
+            outcomes.append(
+                _price_outcome(
+                    row["id"],
+                    row["name"],
+                    ticker,
+                    ticker or None,
+                    "skipped",
+                    _LIABILITY_SKIP_REASON,
+                    currency=row["currency"] or "USD",
+                )
+            )
+        elif not ticker:
+            outcomes.append(
+                _price_outcome(
+                    row["id"],
+                    row["name"],
+                    ticker,
+                    None,
+                    "skipped",
+                    "no ticker",
+                    currency=row["currency"] or "USD",
+                )
+            )
+        else:
+            outcomes.append(
+                _price_outcome(
+                    row["id"],
+                    row["name"],
+                    ticker,
+                    ticker,
+                    "skipped",
+                    "no quantity",
+                    currency=row["currency"] or "USD",
+                )
+            )
+
+    # Stamped whether or not anything actually moved (an empty portfolio, or a
+    # run that only hit skips/failures, still counts as "a refresh happened
+    # just now") — this is the dashboard's only source for prices staleness,
+    # and a silent no-op refresh is exactly the case carry-forward would
+    # otherwise hide.
+    await stamp_prices_refreshed()
+
+    return {
+        "price_date": price_date,
+        "updated": sum(1 for o in outcomes if o["status"] == "updated"),
+        "skipped": sum(1 for o in outcomes if o["status"] == "skipped"),
+        "failed": sum(1 for o in outcomes if o["status"] == "failed"),
+        "outcomes": outcomes,
+    }
+
+
+async def reconvert_foreign_currency_rows(
+    price_date: str | None = None,
+    *,
+    skip_asset_ids: Collection[int] | None = None,
+) -> dict:
+    """Reconvert every non-USD active row's cached USD value at the latest rate.
+
+    A debt is included and its ``value`` is written positive, unchanged — signing
+    belongs to the aggregates (``_SIGNED``), not to this write. No network call
+    happens here (rates are already saved in the DB), so the whole pass is one
+    transaction.
+    """
+    db = await get_db()
+    if not price_date:
+        price_date = date.today().isoformat()  # noqa: DTZ011 - local calendar date
+    skip = set(skip_asset_ids or ())
+
+    cursor = await db.execute("""
+        SELECT id, name, category, currency, value FROM assets
+        WHERE is_active = 1 AND currency <> 'USD'
+        ORDER BY id
+    """)
+    rows = [dict(row) for row in await cursor.fetchall()]
+
+    outcomes = []
+    for row in rows:
+        asset_id = row["id"]
+        if asset_id in skip:
+            continue
+        value_usd = round(
+            await currency_service.convert_to_usd(row["value"], row["currency"]), 2
+        )
+        await db.execute(
+            "UPDATE assets SET value_usd = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (value_usd, asset_id),
+        )
+        await db.execute(
+            """INSERT OR REPLACE INTO snapshots
+               (snapshot_date, asset_id, value, currency, value_usd)
+               VALUES (?, ?, ?, ?, ?)""",
+            (price_date, asset_id, row["value"], row["currency"], value_usd),
+        )
+        outcomes.append(
+            _price_outcome(
+                asset_id,
+                row["name"],
+                "",
+                None,
+                "updated",
+                f"reconverted at the latest {row['currency']}→USD rate",
+                source="fx",
+                value_usd=value_usd,
+                value_native=row["value"],
+                currency=row["currency"],
+            )
+        )
+
+    await db.commit()
+    return {
+        "price_date": price_date,
+        "reconverted": len(outcomes),
+        "outcomes": outcomes,
+    }
+
+
+async def write_net_worth_history(day: str | None = None) -> dict:
+    """Write today's assets-minus-debts row into ``net_worth_history``.
+
+    Uses the chart's own as-of basis (``_LATEST_PER_ASSET_AS_OF``) so this row
+    can never disagree with ``get_net_worth_history``'s curve. When nothing was
+    ever snapshotted on or before ``day``, writes nothing — a row of zeros would
+    assert "net worth is zero", which is exactly the confusion
+    ``_get_net_worth_at_date`` exists to avoid. ``INSERT OR REPLACE`` so a
+    second run the same day corrects the row rather than duplicating it.
+    """
+    db = await get_db()
+    if not day:
+        day = date.today().isoformat()  # noqa: DTZ011 - local calendar date
+
+    cursor = await db.execute(
+        f"""
+        SELECT COUNT(*) AS rows_found,
+               COALESCE(SUM(CASE WHEN a.category = 'debt' THEN 0 ELSE s.value_usd END), 0)
+                   AS total_assets_usd,
+               COALESCE(SUM(CASE WHEN a.category = 'debt' THEN s.value_usd ELSE 0 END), 0)
+                   AS total_debts_usd,
+               COALESCE(SUM({_SIGNED}), 0) AS net_worth_usd
+        FROM assets a
+        JOIN ({_LATEST_PER_ASSET_AS_OF}) s ON a.id = s.asset_id
+        WHERE a.is_active = 1
+        """,
+        (day,),
+    )
+    row = await cursor.fetchone()
+    if not row or not row["rows_found"]:
+        return {"written": False, "reason": f"no snapshots on or before {day}"}
+
+    total_assets_usd = float(row["total_assets_usd"])
+    total_debts_usd = float(row["total_debts_usd"])
+    net_worth_usd = float(row["net_worth_usd"])
+
+    # Investable is asset-side and gross-assets denominated, matching
+    # get_net_worth_history's inv_query.
+    inv_cursor = await db.execute(
+        f"""
+        SELECT a.investable AS investable, SUM(s.value_usd) AS total
+        FROM assets a
+        JOIN ({_LATEST_PER_ASSET_AS_OF}) s ON a.id = s.asset_id
+        WHERE a.is_active = 1 AND a.category = 'asset' AND a.investable LIKE 'investable%'
+        GROUP BY a.investable
+        """,
+        (day,),
+    )
+    investable_breakdown = {
+        inv_row["investable"]: float(inv_row["total"])
+        for inv_row in await inv_cursor.fetchall()
+        if inv_row["total"] is not None
+    }
+    investable_total_usd = sum(investable_breakdown.values())
+
+    await db.execute(
+        """INSERT OR REPLACE INTO net_worth_history
+           (snapshot_date, total_assets_usd, total_debts_usd, net_worth_usd,
+            investable_total_usd, investable_breakdown)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            day,
+            total_assets_usd,
+            total_debts_usd,
+            net_worth_usd,
+            investable_total_usd,
+            json.dumps(investable_breakdown),
+        ),
+    )
+    await db.commit()
+
+    return {
+        "written": True,
+        "snapshot_date": day,
+        "total_assets_usd": total_assets_usd,
+        "total_debts_usd": total_debts_usd,
+        "net_worth_usd": net_worth_usd,
+    }
+
+
+async def run_daily_valuation(price_date: str | None = None) -> dict:
+    """The opt-in daily job: fresh FX, then prices, then FX reconversion, then
+    the net_worth_history row — in that order, because each step reads what the
+    one before it wrote.
+
+    ``fetch_rates_from_nbu`` already returns ``{}`` on any failure, so a dead
+    NBU degrades to "prices only" rather than aborting the run.
+    """
+    if not price_date:
+        price_date = date.today().isoformat()  # noqa: DTZ011 - local calendar date
+
+    fx_rates = await currency_service.fetch_rates_from_nbu(price_date)
+    prices = await refresh_all_prices(price_date)
+    # The price path already wrote a fresher USD figure for these rows; the FX
+    # pass must not immediately overwrite it with a same-day reconversion.
+    priced_ids = {o["asset_id"] for o in prices["outcomes"] if o["status"] == "updated"}
+    fx = await reconvert_foreign_currency_rows(price_date, skip_asset_ids=priced_ids)
+    history = await write_net_worth_history(price_date)
+
+    return {
+        "price_date": price_date,
+        "updated": prices["updated"],
+        "skipped": prices["skipped"],
+        "failed": prices["failed"],
+        "reconverted": fx["reconverted"],
+        "outcomes": prices["outcomes"] + fx["outcomes"],
+        "fx_rates": fx_rates,
+        "history": history,
     }
 
 

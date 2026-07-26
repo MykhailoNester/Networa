@@ -3,7 +3,7 @@ from fastapi.responses import HTMLResponse
 
 from .. import templates
 from ..models import DashboardResponse
-from ..services import snapshot_service
+from ..services import settings_service, snapshot_service
 
 router = APIRouter()
 
@@ -14,6 +14,14 @@ async def dashboard_page(request: Request):
     history = await snapshot_service.get_net_worth_history()
     period_returns = await snapshot_service.get_period_returns(data)
     top_movers = await snapshot_service.get_top_movers(days=30, limit=5)
+    # Display only, one settings read: when a refresh (manual or automatic)
+    # last ran. Carry-forward otherwise hides staleness entirely.
+    prices_refreshed_at = (
+        await settings_service.get_setting(
+            snapshot_service.SETTING_PRICES_REFRESHED_AT, ""
+        )
+        or None
+    )
 
     return templates.TemplateResponse(
         request,
@@ -24,6 +32,7 @@ async def dashboard_page(request: Request):
             "history": history,
             "period_returns": period_returns,
             "top_movers": top_movers,
+            "prices_refreshed_at": prices_refreshed_at,
             "page": "dashboard",
         },
     )

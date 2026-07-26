@@ -21,7 +21,9 @@ A self-hosted personal net-worth and asset tracker for monitoring assets, debts,
 - **Cash Flow** — log contributions, withdrawals, and dividends per asset
 - **Exchange Rates** — manual FX rates with one-click USD recalculation
 - **Import** — bulk import of assets and cash flows from CSV (see [docs/import-format.md](docs/import-format.md))
-- **Snapshots** — automatic daily snapshots + manual trigger; historical net worth chart
+- **Snapshots** — manual and market-driven value history per asset; historical net worth chart
+- **Auto-valuation** — refresh every ticker-bearing asset from live market data on demand, or on an opt-in daily schedule (see [docs/auto-valuation.md](docs/auto-valuation.md))
+- **Settings** — toggle the daily auto-valuation schedule and see its run hour, last run, and next scheduled run
 
 ## Demo
 
@@ -153,6 +155,7 @@ For automated backups, add a cron entry:
 │   ├── forms.py             # Typed form-field helpers
 │   ├── html.py              # Escaping helpers for router-built HTML
 │   ├── security.py          # Same-origin + Host checks
+│   ├── scheduler.py         # Opt-in daily auto-valuation background task
 │   ├── routers/             # FastAPI route handlers
 │   ├── services/            # Business logic (incl. first-run sample seeding)
 │   └── static/vendor/       # Vendored htmx, Chart.js and fonts (no CDN)

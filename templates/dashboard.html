@@ -4,7 +4,15 @@
 {% block content %}
 <div class="page-header">
     <h1>Net Worth Overview</h1>
+    {% include "partials/refresh_prices_button.html" %}
 </div>
+{# Carry-forward hides staleness between refreshes, so this one line always
+   says outright when prices were last refreshed — same height either way,
+   so it never shifts the cards below it. #}
+<div class="text-muted" style="font-size:12px; margin-bottom:20px">
+    {% if prices_refreshed_at %}Prices updated {{ prices_refreshed_at }}{% else %}Prices never refreshed{% endif %}
+</div>
+{% include "partials/refresh_prices_modal.html" %}
 
 <!-- Summary Cards -->
 <div class="cards-row" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))">

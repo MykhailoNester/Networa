@@ -5,7 +5,9 @@
 <!-- Page Header -->
 <div class="page-header" style="margin-bottom: 20px;">
     <h1>Assets</h1>
+    {% include "partials/refresh_prices_button.html" %}
 </div>
+{% include "partials/refresh_prices_modal.html" %}
 
 <!-- Sheet Summary Bar -->
 {% if sheets_with_totals %}

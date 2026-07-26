@@ -1,0 +1,17 @@
+{# Included by both the dashboard and the assets page so the markup — and the
+   hx-target it points at — cannot drift between the two. Opens the shared
+   refresh-prices modal (partials/refresh_prices_modal.html, included by both
+   pages too) the instant the request is issued, with its own "Refreshing…"
+   placeholder already showing, rather than leaving the button looking frozen
+   until the response lands. #}
+<button class="btn btn-sm btn-secondary"
+        hx-post="/prices/refresh"
+        hx-target="#refresh-prices-modal-body"
+        hx-swap="innerHTML"
+        hx-disabled-elt="this"
+        hx-on::before-request="openRefreshPricesModal()"
+        hx-on::response-error="refreshPricesFailed()"
+        hx-on::send-error="refreshPricesFailed()"
+        title="Fetch the latest market price for every asset with a ticker and a quantity">
+    Refresh prices
+</button>

@@ -1,7 +1,32 @@
-"""Market data service — fetch ticker prices from Yahoo Finance."""
+"""Market data service — fetch ticker prices from Yahoo Finance.
+
+Yahoo quotes spot crypto as a pair, e.g. ``BTC-USD`` or ``ETH-USD``, while a
+user (and the seeded sample portfolio, ``app/services/sample_data.py``) types
+the bare coin symbol — ``BTC``, ``ETH``. ``resolve_symbol`` appends the
+``-USD`` suffix for a bare ticker filed under the ``crypto`` asset class;
+``snapshot_service.revalue_asset_from_market`` retries with the raw ticker if
+the ``-USD`` pair comes back empty, so a crypto-flavoured equity (e.g. ``GBTC``,
+a trust that trades as a stock, not a coin pair) still prices.
+"""
 
 from datetime import UTC, datetime
 from urllib.parse import quote
+
+
+def resolve_symbol(ticker: str, asset_class: str | None = None) -> str:
+    """The symbol to ask Yahoo for, given a user-entered ticker.
+
+    Only the ``crypto`` asset class gets the ``-USD`` treatment, and only for a
+    bare symbol: a ticker that already carries a pair separator (``BTC-EUR``) or
+    an exchange suffix (``0700.HK``, filed under crypto by mistake) is passed
+    through unchanged. Every other asset class is untouched apart from
+    whitespace. Purely synchronous and side-effect free, so it needs no network
+    stub to unit test.
+    """
+    ticker = ticker.strip()
+    if asset_class != "crypto" or not ticker or "-" in ticker or "." in ticker:
+        return ticker
+    return f"{ticker.upper()}-USD"
 
 
 async def fetch_ticker_price(ticker: str, price_date: str) -> tuple[float, str] | None:
