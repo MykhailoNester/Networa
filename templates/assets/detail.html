@@ -356,10 +356,29 @@
         </div>
     </div>
 
+    {# The add-transaction form lives outside the table: a <form> is not a legal child of
+       <tr>, so the cells below reach it by id via their form="" attribute instead. #}
+    {% macro cf_add_form(asset_id) %}
+    <form action="/cashflows/create" method="post" id="asset-cf-add-form">
+        <input type="hidden" name="asset_id" value="{{ asset_id }}">
+        <input type="hidden" name="redirect_to" value="/assets/{{ asset_id }}?tab=returns">
+    </form>
+    {% endmacro %}
+    {% macro cf_add_row() %}
+    <tr>
+        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
+        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
+        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
+    </tr>
+    {% endmacro %}
+
     {% if has_cashflows %}
     <!-- ---- Cash Flow mode ---- -->
     <div class="card">
         <h3 class="section-label">Cash Flow <span class="text-muted" style="font-size:11px; font-weight:400; margin-left:6px;">buys &amp; sells</span></h3>
+        {{ cf_add_form(asset.id) }}
         <div class="table-container">
             <table>
                 <thead>
@@ -401,17 +420,7 @@
                     </tr>
                 </tbody>
                 <tfoot>
-                    <tr>
-                        <form action="/cashflows/create" method="post" id="asset-cf-add-form">
-                            <input type="hidden" name="asset_id" value="{{ asset.id }}">
-                            <input type="hidden" name="redirect_to" value="/assets/{{ asset.id }}?tab=returns">
-                        </form>
-                        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
-                        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
-                        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
-                    </tr>
+                    {{ cf_add_row() }}
                 </tfoot>
             </table>
         </div>
@@ -453,6 +462,7 @@
     <!-- Empty cash flow table for adding transactions -->
     <div class="card" style="margin-top: 12px;">
         <h3 class="section-label">Cash Flow <span class="text-muted" style="font-size:11px; font-weight:400; margin-left:6px;">add transactions instead of cost basis</span></h3>
+        {{ cf_add_form(asset.id) }}
         <div class="table-container">
             <table>
                 <thead>
@@ -468,17 +478,7 @@
                     <tr><td colspan="5" class="text-muted" style="font-size:13px; padding:12px 0">No transactions yet.</td></tr>
                 </tbody>
                 <tfoot>
-                    <tr>
-                        <form action="/cashflows/create" method="post" id="asset-cf-add-form">
-                            <input type="hidden" name="asset_id" value="{{ asset.id }}">
-                            <input type="hidden" name="redirect_to" value="/assets/{{ asset.id }}?tab=returns">
-                        </form>
-                        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
-                        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
-                        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
-                    </tr>
+                    {{ cf_add_row() }}
                 </tfoot>
             </table>
         </div>
@@ -504,22 +504,18 @@
                 <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
                     Investable assets are those held in cash or in forms that can be quickly liquidated.
                 </p>
+                {% set investable = asset.investable or 'non_investable' %}
                 <div style="display: flex; flex-direction: column; gap: 10px;">
+                    {% for value, label in [
+                        ('investable_cash', 'Investable - Cash'),
+                        ('investable', 'Investable - Easy to convert to cash'),
+                        ('non_investable', 'Non Investable')] %}
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="investable" value="investable_cash"
-                               {% if asset.investable == 'investable_cash' %}checked{% endif %}>
-                        Investable - Cash
+                        <input type="radio" name="investable" value="{{ value }}"
+                               {% if value == investable %}checked{% endif %}>
+                        {{ label }}
                     </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="investable" value="investable"
-                               {% if asset.investable == 'investable' %}checked{% endif %}>
-                        Investable - Easy to convert to cash
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="investable" value="non_investable"
-                               {% if asset.investable == 'non_investable' or not asset.investable %}checked{% endif %}>
-                        Non Investable
-                    </label>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}
@@ -546,21 +542,16 @@
                     Will this asset be subject to taxes on liquidation or sale?
                 </p>
                 <div style="display: flex; flex-direction: column; gap: 10px;">
+                    {% for value, label in [
+                        ('taxable', 'Taxable'),
+                        ('tax_deferred', 'Tax Deferred'),
+                        ('tax_free', 'Tax Free')] %}
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="tax_status" value="taxable"
-                               {% if asset.tax_status == 'taxable' %}checked{% endif %}>
-                        Taxable
+                        <input type="radio" name="tax_status" value="{{ value }}"
+                               {% if value == asset.tax_status %}checked{% endif %}>
+                        {{ label }}
                     </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="tax_status" value="tax_deferred"
-                               {% if asset.tax_status == 'tax_deferred' %}checked{% endif %}>
-                        Tax Deferred
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="tax_status" value="tax_free"
-                               {% if asset.tax_status == 'tax_free' %}checked{% endif %}>
-                        Tax Free
-                    </label>
+                    {% endfor %}
                 </div>
             </div>
             {% endif %}

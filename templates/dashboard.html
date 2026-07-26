@@ -167,7 +167,7 @@
         </div>
         <div style="flex:1; min-width:200px">
             <div class="investable-bar">
-                <div class="investable-bar-fill" style="width:{{ "{:.1f}".format(inv_pct) }}%"></div>
+                <div class="investable-bar-fill" style="width:{{ '{:.1f}'.format(inv_pct) }}%"></div>
             </div>
         </div>
         <div style="text-align:right">
@@ -188,7 +188,7 @@
             <span style="width:8px; height:8px; border-radius:50%; background:{{ color }}; flex-shrink:0"></span>
             <span style="font-size:13px; color:var(--text-secondary); width:120px">{{ label }}</span>
             <div style="flex:1; height:4px; background:var(--bg-hover); border-radius:2px; overflow:hidden">
-                <div style="height:100%; width:{{ "{:.1f}".format(pct) }}%; background:{{ color }}; border-radius:2px"></div>
+                <div style="height:100%; width:{{ '{:.1f}'.format(pct) }}%; background:{{ color }}; border-radius:2px"></div>
             </div>
             <span class="mono" style="font-size:13px; color:var(--text-primary); width:100px; text-align:right">{{ amount | format_display }}</span>
             <span style="font-size:12px; color:var(--text-muted); width:40px; text-align:right">{{ "{:.1f}".format(pct) }}%</span>
