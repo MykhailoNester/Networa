@@ -10,10 +10,15 @@
 {% endif %}
 
 {% if contributors %}
-<div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px">Per Asset</div>
+<div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px">Per Line</div>
 {% for c in contributors %}
 <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
-    <span style="font-size:13px; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55%">{{ c.name }}</span>
+    <span style="font-size:13px; color:var(--text-primary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:55%">
+        {{ c.name }}
+        {# A debt's contribution is signed by its effect on net worth, so a paid-down
+           balance shows as a gain. The badge explains why. #}
+        {% if c.category == 'debt' %}<span class="text-muted" style="font-size:10px; border:1px solid var(--border); border-radius:3px; padding:0 4px; margin-left:5px; vertical-align:1px">debt</span>{% endif %}
+    </span>
     <div style="text-align:right; flex-shrink:0">
         <span class="mono {% if c.change >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:13px">
             {% if c.change >= 0 %}+{% endif %}{{ c.change | format_display }}

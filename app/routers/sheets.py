@@ -85,7 +85,6 @@ async def sheets_page(request: Request):
 
 @router.post("/sheets/create")
 async def create_sheet_form(
-    request: Request,
     name: str = Form(...),
     sort_order: int = Form(0),
 ):

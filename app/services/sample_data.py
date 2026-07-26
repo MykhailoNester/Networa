@@ -116,7 +116,7 @@ async def maybe_seed_sample_data() -> int:
 
     sheet_ids: dict[str, int] = {}
     for order, name in enumerate(("Investments", "Cash & Savings", "Property")):
-        cursor = await db.execute(
+        await db.execute(
             "INSERT OR IGNORE INTO sheets (name, sort_order) VALUES (?, ?)",
             (name, order),
         )

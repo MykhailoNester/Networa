@@ -43,6 +43,16 @@ CURRENCY_SYMBOLS = {
 _display_state: dict = {"currency": "USD", "multiplier": 1.0, "symbol": "$"}
 
 
+def display_state() -> dict:
+    """The active display currency, its USD multiplier and its symbol.
+
+    Callers outside this module read the state through here rather than touching
+    `_display_state`; the dict is mutated in place by reload_display_state(), so
+    the returned reference always reflects the current setting.
+    """
+    return _display_state
+
+
 async def get_rate(from_currency: str, to_currency: str = "USD") -> float:
     if from_currency == to_currency:
         return 1.0

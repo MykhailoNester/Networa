@@ -3,11 +3,17 @@
 
 {% block content %}
 {% set estimated_tax = asset.estimated_tax %}
+{% set is_debt = asset.category == 'debt' %}
+{# One vocabulary for the page, which serves both categories: a debt has a
+   balance owed, an asset has a value. #}
+{% set kind = 'Debt' if is_debt else 'Asset' %}
+{% set amount = 'Balance' if is_debt else 'Value' %}
+{% set class_label = 'Class' if is_debt else 'Asset Class' %}
 
 <!-- Header -->
 <div class="page-header" style="align-items: flex-start; margin-bottom: 24px;">
     <div style="flex: 1;">
-        <a href="/assets" style="font-size: 13px; color: var(--text-secondary);">&larr; Back to Assets</a>
+        <a href="{{ '/debts' if is_debt else '/assets' }}" style="font-size: 13px; color: var(--text-secondary);">&larr; Back to {{ kind }}s</a>
         <h1 style="margin-top: 4px; margin-bottom: 4px;">{{ asset.name }}</h1>
         <p class="text-muted" style="margin: 0; font-size: 13px;">
             {{ asset.description or '' }}
@@ -20,12 +26,12 @@
         {% if asset.currency != 'USD' %}
         <div class="text-muted mono" style="font-size: 14px;">{{ asset.value | format_currency(asset.currency) }} {{ asset.currency }}</div>
         {% endif %}
-        {% if estimated_tax %}
+        {% if estimated_tax and not is_debt %}
         <span style="background: rgba(245,158,11,0.15); color: #f59e0b; border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 600;">
             Est. Tax: {{ estimated_tax | format_currency }}
         </span>
         {% endif %}
-        {% if asset.gain_loss is not none %}
+        {% if asset.gain_loss is not none and not is_debt %}
         <div class="{% if asset.gain_loss > 0 %}text-positive{% else %}text-negative{% endif %} mono" style="font-size: 13px;">
             {% if asset.gain_loss >= 0 %}+{% endif %}{{ asset.gain_loss | format_currency }}
             {% if asset.gain_loss_pct is not none %}({{ "{:+.1f}".format(asset.gain_loss_pct) }}%){% endif %}
@@ -37,8 +43,10 @@
 <!-- Tabs -->
 <div class="tabs" id="detail-tabs" style="margin-bottom: 0;">
     <button class="tab" data-tab="overview" onclick="showTab('overview', this)">OVERVIEW</button>
-    <button class="tab" data-tab="value" onclick="showTab('value', this)">VALUE</button>
+    <button class="tab" data-tab="value" onclick="showTab('value', this)">{{ amount | upper }}</button>
+    {% if not is_debt %}
     <button class="tab" data-tab="returns" onclick="showTab('returns', this)">RETURNS</button>
+    {% endif %}
     <button class="tab" data-tab="reporting" onclick="showTab('reporting', this)">REPORTING</button>
     <button class="tab" data-tab="assorted" onclick="showTab('assorted', this)">ASSORTED</button>
     <button class="tab" data-tab="notes" onclick="showTab('notes', this)">NOTES</button>
@@ -56,11 +64,11 @@
 <div id="tab-overview" class="tab-panel" style="margin-top: 24px; display: none;">
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="detail-grid">
         <div class="card">
-            <h3 class="section-label">Asset Info</h3>
+            <h3 class="section-label">{{ kind }} Info</h3>
             <form action="/assets/{{ asset.id }}/edit" method="post">
                 <input type="hidden" name="tab" value="overview">
                 {% set cls = asset.asset_class %}
-                {% set no_ticker = cls in ['cash', 'real_estate', 'vehicle'] %}
+                {% set no_ticker = is_debt or cls in ['cash', 'real_estate', 'vehicle'] %}
                 {% if not no_ticker %}
                 <div class="form-row">
                     <div class="form-group">
@@ -75,12 +83,12 @@
                 {% endif %}
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Current Value</label>
-                        <div class="mono" style="padding: 8px 0; font-size: 17px; font-weight: 600;">
+                        <label>Current {{ amount }}</label>
+                        <div class="mono {{ 'text-negative' if is_debt else '' }}" style="padding: 8px 0; font-size: 17px; font-weight: 600;">
                             {{ current_value_usd | format_display }} {{ display_currency }}
                         </div>
                         <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
-                            Record new values in the <a href="#" onclick="showTab('value', document.querySelector('[data-tab=value]')); return false;" style="color: var(--text-secondary); text-decoration: underline;">VALUE tab</a>
+                            Record new {{ amount | lower }}s in the <a href="#" onclick="showTab('value', document.querySelector('[data-tab=value]')); return false;" style="color: var(--text-secondary); text-decoration: underline;">{{ amount | upper }} tab</a>
                         </div>
                     </div>
                     <div class="form-group">
@@ -109,12 +117,12 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label>Purchase Date</label>
+                        <label>{{ 'Opened' if is_debt else 'Purchase Date' }}</label>
                         <input type="date" name="purchase_date" value="{{ asset.purchase_date or '' }}">
                     </div>
                     {% if asset.holding_period_days is not none %}
                     <div class="form-group">
-                        <label>Holding Period</label>
+                        <label>{{ 'Held For' if is_debt else 'Holding Period' }}</label>
                         <input type="text" disabled value="{{ asset.holding_period_days }} days" style="color: var(--text-secondary);">
                     </div>
                     {% endif %}
@@ -155,24 +163,24 @@
             <div class="card" style="margin-bottom: 16px;">
                 <h3 class="section-label">Details</h3>
                 <table style="width: 100%;" class="detail-info-table">
-                    <tr><td class="text-muted">Asset Class</td><td class="text-right">{{ asset.asset_class | replace('_', ' ') | title }}</td></tr>
+                    <tr><td class="text-muted">{{ class_label }}</td><td class="text-right">{{ asset.asset_class | replace('_', ' ') | title }}</td></tr>
                     <tr><td class="text-muted">Sheet</td><td class="text-right">{{ asset.sheet_name or 'None' }}</td></tr>
                     <tr><td class="text-muted">Ownership</td><td class="text-right">{{ "{:.0%}".format(asset.ownership) }}</td></tr>
-                    {% if asset.irr %}
+                    {% if asset.irr and not is_debt %}
                     <tr>
                         <td class="text-muted">IRR</td>
                         <td class="text-right mono {% if asset.irr > 0 %}text-positive{% else %}text-negative{% endif %}">{{ "{:.1f}".format(asset.irr) }}%</td>
                     </tr>
                     {% endif %}
-                    {% if asset.liquidity %}
+                    {% if asset.liquidity and not is_debt %}
                     <tr><td class="text-muted">Liquidity</td><td class="text-right">{{ asset.liquidity | title }}</td></tr>
                     {% endif %}
                     <tr><td class="text-muted">Added</td><td class="text-right text-muted">{{ (asset.created_at or '')[:10] }}</td></tr>
                 </table>
             </div>
 
-            <form action="/assets/{{ asset.id }}/delete" method="post" onsubmit="return confirm('Delete this asset?')">
-                <button type="submit" class="btn btn-danger" style="width: 100%;">Delete Asset</button>
+            <form action="/assets/{{ asset.id }}/delete" method="post" onsubmit="return confirm('Delete this {{ kind | lower }}?')">
+                <button type="submit" class="btn btn-danger" style="width: 100%;">Delete {{ kind }}</button>
             </form>
         </div>
     </div>
@@ -211,12 +219,13 @@
             {% endif %}
         </div>
     </div>
+    {# The chart needs data; the history card below renders either way, with an
+       empty tbody until the first value is recorded. #}
     {% if snapshots %}
-
     <!-- Chart card -->
     <div class="card" style="margin-bottom: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <h3 class="section-label" style="margin: 0;">Value Over Time</h3>
+            <h3 class="section-label" style="margin: 0;">{{ amount }} Over Time</h3>
             <div style="display: flex; gap: 4px;">
                 {% for r in ['1M', '3M', 'YTD', '1Y', 'All'] %}
                 <button class="btn btn-sm range-btn {% if r == 'All' %}btn-primary{% else %}btn-secondary{% endif %}"
@@ -228,11 +237,12 @@
             <canvas id="assetValueChart"></canvas>
         </div>
     </div>
+    {% endif %}
 
     <!-- History table -->
     <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h3 class="section-label" style="margin: 0;">Value History</h3>
+            <h3 class="section-label" style="margin: 0;">{{ amount }} History</h3>
             <div style="display: flex; gap: 6px; align-items: center;">
                 <input type="date" id="new-snap-date" name="snapshot_date" value="{{ today }}"
                        style="padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px;">
@@ -260,7 +270,7 @@
                     <tr>
                         <th>Date</th>
                         {% if asset.ticker %}<th>Ticker</th>{% endif %}
-                        <th class="text-right">Value ({{ display_currency }})</th>
+                        <th class="text-right">{{ amount }} ({{ display_currency }})</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -289,46 +299,6 @@
             </table>
         </div>
     </div>
-    {% else %}
-    <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h3 class="section-label" style="margin: 0;">Value History</h3>
-            <div style="display: flex; gap: 6px; align-items: center;">
-                <input type="date" id="new-snap-date" name="snapshot_date" value="{{ today }}"
-                       style="padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px;">
-                <input type="number" id="new-snap-value" name="value_usd" step="0.01" min="0"
-                       value="{{ current_value_usd | round(2) }}" placeholder="Value (USD)"
-                       style="width: 130px; padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px; text-align: right;">
-                <button class="btn btn-sm btn-primary"
-                        hx-post="/assets/{{ asset.id }}/snapshots/add"
-                        hx-include="#new-snap-date, #new-snap-value"
-                        hx-target="#snap-tbody"
-                        hx-swap="innerHTML">Add</button>
-                {% if asset.currency != 'USD' or (asset.ticker and asset.quantity) %}
-                <button class="btn btn-sm btn-secondary"
-                        hx-post="/assets/{{ asset.id }}/snapshots/add-auto"
-                        hx-include="#new-snap-date"
-                        hx-target="#snap-tbody"
-                        hx-swap="innerHTML"
-                        title="{% if asset.ticker and asset.quantity %}Fetch {{ asset.ticker }} price from Yahoo Finance ({{ asset.quantity }} units){% else %}Add snapshot using NBU exchange rate for {{ asset.currency }}{% endif %}">Auto</button>
-                {% endif %}
-            </div>
-        </div>
-        <div class="table-container">
-            <table id="value-history-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        {% if asset.ticker %}<th>Ticker</th>{% endif %}
-                        <th class="text-right">Value ({{ display_currency }})</th>
-                        <th></th>
-                    </tr>
-                </thead>
-                <tbody id="snap-tbody"></tbody>
-            </table>
-        </div>
-    </div>
-    {% endif %}
     <!-- Hidden placeholder so OOB chart-data swap always has a target -->
     <div id="snap-chart-data" style="display:none"></div>
 </div>
@@ -336,6 +306,8 @@
 <!-- ======================================================= -->
 <!-- Tab: RETURNS                                             -->
 <!-- ======================================================= -->
+{# Assets only: a debt has no cost basis, no unrealized gain and no return. #}
+{% if not is_debt %}
 <div id="tab-returns" class="tab-panel" style="margin-top: 24px; display: none;">
     {% set has_cashflows = cashflows | length > 0 %}
     {% set has_cost_basis = asset.cost_basis is not none and asset.cost_basis %}
@@ -384,10 +356,29 @@
         </div>
     </div>
 
+    {# The add-transaction form lives outside the table: a <form> is not a legal child of
+       <tr>, so the cells below reach it by id via their form="" attribute instead. #}
+    {% macro cf_add_form(asset_id) %}
+    <form action="/cashflows/create" method="post" id="asset-cf-add-form">
+        <input type="hidden" name="asset_id" value="{{ asset_id }}">
+        <input type="hidden" name="redirect_to" value="/assets/{{ asset_id }}?tab=returns">
+    </form>
+    {% endmacro %}
+    {% macro cf_add_row() %}
+    <tr>
+        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
+        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
+        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
+        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
+    </tr>
+    {% endmacro %}
+
     {% if has_cashflows %}
     <!-- ---- Cash Flow mode ---- -->
     <div class="card">
         <h3 class="section-label">Cash Flow <span class="text-muted" style="font-size:11px; font-weight:400; margin-left:6px;">buys &amp; sells</span></h3>
+        {{ cf_add_form(asset.id) }}
         <div class="table-container">
             <table>
                 <thead>
@@ -429,17 +420,7 @@
                     </tr>
                 </tbody>
                 <tfoot>
-                    <tr>
-                        <form action="/cashflows/create" method="post" id="asset-cf-add-form">
-                            <input type="hidden" name="asset_id" value="{{ asset.id }}">
-                            <input type="hidden" name="redirect_to" value="/assets/{{ asset.id }}?tab=returns">
-                        </form>
-                        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
-                        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
-                        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
-                    </tr>
+                    {{ cf_add_row() }}
                 </tfoot>
             </table>
         </div>
@@ -481,6 +462,7 @@
     <!-- Empty cash flow table for adding transactions -->
     <div class="card" style="margin-top: 12px;">
         <h3 class="section-label">Cash Flow <span class="text-muted" style="font-size:11px; font-weight:400; margin-left:6px;">add transactions instead of cost basis</span></h3>
+        {{ cf_add_form(asset.id) }}
         <div class="table-container">
             <table>
                 <thead>
@@ -496,23 +478,14 @@
                     <tr><td colspan="5" class="text-muted" style="font-size:13px; padding:12px 0">No transactions yet.</td></tr>
                 </tbody>
                 <tfoot>
-                    <tr>
-                        <form action="/cashflows/create" method="post" id="asset-cf-add-form">
-                            <input type="hidden" name="asset_id" value="{{ asset.id }}">
-                            <input type="hidden" name="redirect_to" value="/assets/{{ asset.id }}?tab=returns">
-                        </form>
-                        <td><input type="date" name="flow_date" form="asset-cf-add-form" style="width:130px" id="asset-cf-date"></td>
-                        <td><input type="text" name="description" form="asset-cf-add-form" placeholder="e.g. Buy 10 shares" style="width:100%"></td>
-                        <td><input type="number" name="cash_in" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><input type="number" name="cash_out" step="0.01" value="0" form="asset-cf-add-form" style="width:100px"></td>
-                        <td><button type="submit" form="asset-cf-add-form" class="btn btn-sm btn-primary">Add</button></td>
-                    </tr>
+                    {{ cf_add_row() }}
                 </tfoot>
             </table>
         </div>
     </div>
     {% endif %}
 </div>
+{% endif %}
 
 <!-- ======================================================= -->
 <!-- Tab: REPORTING                                           -->
@@ -522,36 +495,37 @@
         <form action="/assets/{{ asset.id }}/edit" method="post">
             <input type="hidden" name="tab" value="reporting">
 
+            {# snapshot_service excludes debts from the investable totals, so this
+               control would be a no-op on one. #}
+            {% if not is_debt %}
             <!-- Investable -->
             <div style="margin-bottom: 28px;">
                 <h3 class="section-label">Investable Asset?</h3>
                 <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
                     Investable assets are those held in cash or in forms that can be quickly liquidated.
                 </p>
+                {% set investable = asset.investable or 'non_investable' %}
                 <div style="display: flex; flex-direction: column; gap: 10px;">
+                    {% for value, label in [
+                        ('investable_cash', 'Investable - Cash'),
+                        ('investable', 'Investable - Easy to convert to cash'),
+                        ('non_investable', 'Non Investable')] %}
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="investable" value="investable_cash"
-                               {% if asset.investable == 'investable_cash' %}checked{% endif %}>
-                        Investable - Cash
+                        <input type="radio" name="investable" value="{{ value }}"
+                               {% if value == investable %}checked{% endif %}>
+                        {{ label }}
                     </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="investable" value="investable"
-                               {% if asset.investable == 'investable' %}checked{% endif %}>
-                        Investable - Easy to convert to cash
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="investable" value="non_investable"
-                               {% if asset.investable == 'non_investable' or not asset.investable %}checked{% endif %}>
-                        Non Investable
-                    </label>
+                    {% endfor %}
                 </div>
             </div>
+            {% endif %}
 
-            <!-- Asset Class -->
+            <!-- Class -->
             <div style="margin-bottom: 28px;">
-                <h3 class="section-label">Asset Class</h3>
+                <h3 class="section-label">{{ class_label }}</h3>
                 <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
-                    Shows on the Assets &times; Class Recap report.
+                    {# '×' as a literal, not &times;: this is an autoescaped expression, not template text. #}
+                    {{ 'Groups this debt on the Debts page.' if is_debt else 'Shows on the Assets × Class Recap report.' }}
                 </p>
                 <select name="asset_class" style="max-width: 300px;">
                     {% for cls in asset_classes %}
@@ -560,6 +534,7 @@
                 </select>
             </div>
 
+            {% if not is_debt %}
             <!-- Tax Status -->
             <div style="margin-bottom: 28px;">
                 <h3 class="section-label">Taxable Asset?</h3>
@@ -567,23 +542,19 @@
                     Will this asset be subject to taxes on liquidation or sale?
                 </p>
                 <div style="display: flex; flex-direction: column; gap: 10px;">
+                    {% for value, label in [
+                        ('taxable', 'Taxable'),
+                        ('tax_deferred', 'Tax Deferred'),
+                        ('tax_free', 'Tax Free')] %}
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="tax_status" value="taxable"
-                               {% if asset.tax_status == 'taxable' %}checked{% endif %}>
-                        Taxable
+                        <input type="radio" name="tax_status" value="{{ value }}"
+                               {% if value == asset.tax_status %}checked{% endif %}>
+                        {{ label }}
                     </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="tax_status" value="tax_deferred"
-                               {% if asset.tax_status == 'tax_deferred' %}checked{% endif %}>
-                        Tax Deferred
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 14px;">
-                        <input type="radio" name="tax_status" value="tax_free"
-                               {% if asset.tax_status == 'tax_free' %}checked{% endif %}>
-                        Tax Free
-                    </label>
+                    {% endfor %}
                 </div>
             </div>
+            {% endif %}
 
             <div style="display: flex; justify-content: flex-end;">
                 <button type="submit" class="btn btn-primary">Save</button>
@@ -604,7 +575,7 @@
             <div style="margin-bottom: 28px;">
                 <h3 class="section-label">Ownership Percentage</h3>
                 <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
-                    Your share, if you co-own this asset with someone.
+                    Your share, if you {{ 'share this debt' if is_debt else 'co-own this asset' }} with someone.
                 </p>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <input type="number" name="ownership" step="1" min="0" max="100"
@@ -619,8 +590,7 @@
                 {% endif %}
             </div>
 
-            <!-- Tax Estimate: hidden entirely for tax_free assets -->
-            {% if asset.tax_status != 'tax_free' %}
+            {% if asset.tax_status != 'tax_free' and not is_debt %}
             <div style="margin-bottom: 28px;">
                 <h3 class="section-label">Tax Estimate</h3>
                 <p class="text-muted" style="font-size: 13px; margin-bottom: 14px;">
@@ -675,6 +645,7 @@
                         <label>Region</label>
                         <input type="text" name="region" value="{{ asset.region or '' }}" placeholder="e.g. North America">
                     </div>
+                    {% if not is_debt %}
                     <div class="form-group">
                         <label>Sector</label>
                         <input type="text" name="sector" value="{{ asset.sector or '' }}" placeholder="e.g. Technology">
@@ -688,6 +659,7 @@
                             {% endfor %}
                         </select>
                     </div>
+                    {% endif %}
                 </div>
             </div>
 
@@ -725,9 +697,17 @@ var activeChart = null;
 var currentRange = 'All';
 
 function showTab(name, btn) {
+    // Not every tab exists for every category — a debt has no RETURNS panel, so
+    // an old ?tab=returns link must fall back rather than throw.
+    var panel = document.getElementById('tab-' + name);
+    if (!panel) {
+        name = 'overview';
+        panel = document.getElementById('tab-overview');
+        btn = document.querySelector('[data-tab="overview"]');
+    }
     document.querySelectorAll('.tab-panel').forEach(p => p.style.display = 'none');
     document.querySelectorAll('#detail-tabs .tab').forEach(t => t.classList.remove('active'));
-    document.getElementById('tab-' + name).style.display = 'block';
+    panel.style.display = 'block';
     if (btn) btn.classList.add('active');
     if (name === 'value' && !activeChart) initChart('All');
 }
@@ -790,13 +770,11 @@ function setRange(range, btn) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Activate tab from URL param or default to 'overview'
     var params = new URLSearchParams(window.location.search);
     var tab = params.get('tab') || 'overview';
     var btn = document.querySelector('[data-tab="' + tab + '"]');
     showTab(tab, btn);
 
-    // Default cashflow add date to today
     var d = document.getElementById('asset-cf-date');
     if (d && !d.value) d.value = new Date().toISOString().slice(0, 10);
 });

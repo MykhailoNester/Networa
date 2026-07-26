@@ -38,9 +38,11 @@ app/
   forms.py              # typed form-field helpers
   html.py               # escaping helpers for router-built HTML fragments
   security.py           # same-origin + Host enforcement middleware
-  routers/              # route handlers (dashboard, assets, cashflows, snapshots, exchange_rates, sheets, import_data)
+  routers/              # route handlers (dashboard, assets, debts, cashflows, snapshots, exchange_rates,
+                        #   sheets, import_data, settings)
                         # CSV import format documented in docs/import-format.md
   services/             # business logic (asset_service, snapshot_service, currency_service, import_service,
+                        #   cashflow_service, market_service, settings_service,
                         #   sample_data — first-run seeding of an empty DB)
 templates/              # Jinja2 HTML templates
 scripts/
@@ -52,6 +54,14 @@ data/                   # SQLite databases: networa.db (default, gitignored) + d
 ## Architecture Notes
 
 - **Routers → Services → Database** pattern; keep business logic in `services/`, not routers.
+- **Assets and debts share one table.** `assets.category` is `'asset'` or `'debt'`, and a debt's value is
+  stored as a **positive** number. Net worth is therefore `assets − debts`, and every aggregate in
+  `snapshot_service` that means *net worth* signs debt rows with −1 (see the `_SIGNED` constant). A debt's
+  contribution to a period is the **negation** of its value change, so paying a mortgage down reads as a
+  gain and the contributor list still sums to the period's net-worth change. Aggregates that describe asset
+  *composition* — allocation by class/sheet, investable tiers, top holdings — stay `category = 'asset'` on
+  purpose and are denominated by **gross assets**, never by net worth. The `/debts` page is a thin view over
+  `asset_service`; creating and editing a debt reuses the assets router's handlers.
 - **No authentication** — single-user, self-hosted deployment. Because of that, `app/security.py` rejects state-changing requests a browser reports as cross-origin, and restricts the `Host` header to block DNS rebinding. The host rule turns on *names*, not addresses: every IP literal and `localhost` are always allowed (they cannot be repointed), while other hostnames need `ALLOWED_HOSTS`. Non-browser clients are unaffected.
 - **Escaping is manual in router-built HTML.** Some HTMX fragments are assembled as f-strings, where Jinja's autoescaping does not apply. Every interpolated DB value must go through `app.html.e()`, and any JSON embedded in a `<script>` block through `app.html.json_for_script()`. Prefer adding new fragments as Jinja partials under `templates/` instead.
 - No third-party requests to render the UI: fonts, HTMX and Chart.js are all vendored under `app/static/vendor/`. Don't reintroduce a CDN link.

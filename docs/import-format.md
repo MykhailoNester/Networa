@@ -17,9 +17,9 @@ Imports rows into the `assets` table.
 |--------|-----------|-----------------|
 | `name` | Required | Asset display name. |
 | `asset_class` | Required | One of: `real_estate`, `precious_metal`, `cash`, `stock`, `fund`, `crypto`, `vehicle`, `investment`, `miscellaneous`. |
-| `value` | Required | Numeric current value. |
+| `value` | Required | Numeric current value. For a `debt` row this is the balance owed; a negative sign is ignored (see `category`). |
 | `currency` | Optional | ISO 4217 code. Defaults to `USD`. Converted to USD via `currency_service.convert_to_usd`. |
-| `category` | Optional | `asset` or `debt`. Defaults to `asset`. |
+| `category` | Optional | `asset` or `debt`. Defaults to `asset`. Debts are subtracted from assets to give net worth, so `category` alone carries the sign: a debt's `value` is stored as a magnitude and exports that write liabilities as negatives (Mint, Kubera and similar) import correctly without editing. |
 | `sheet` | Optional | Sheet name to group the asset under. If the sheet does not exist it is auto-created. |
 | `section` | Optional | Maps to `section_name`. |
 | `ticker` | Optional | Symbol/ticker for stocks, funds, or crypto. |

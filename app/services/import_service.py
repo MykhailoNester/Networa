@@ -99,11 +99,17 @@ async def import_assets_csv(content: str) -> dict:
 
         value_amount = _parse_float(str(value_raw))
         currency = (row.get("currency") or "USD").strip().upper() or "USD"
-        value_usd = await convert_to_usd(value_amount, currency)
 
         category = (row.get("category") or "asset").strip().lower() or "asset"
         if category not in ("asset", "debt"):
             category = "asset"
+
+        # Other tools export liabilities as negatives. Storing that sign would
+        # negate it again on aggregation and *raise* net worth.
+        if category == "debt":
+            value_amount = abs(value_amount)
+
+        value_usd = await convert_to_usd(value_amount, currency)
 
         sheet_id = await resolve_sheet_id(row.get("sheet") or "")
         section_name = (row.get("section") or "").strip() or None

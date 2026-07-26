@@ -177,7 +177,7 @@ async def asset_detail_page(request: Request, asset_id: int):
             "day_change": day_change,
             "alltime_change": alltime_change,
             "today": date.today().isoformat(),  # noqa: DTZ011 - local calendar date
-            "page": "assets",
+            "page": "debts" if asset.get("category") == "debt" else "assets",
         },
     )
 
@@ -376,19 +376,19 @@ async def asset_inline_display(asset_id: int):
 
 
 def _value_cell_html(asset: dict) -> str:
-    from ..services.currency_service import _display_state
+    from ..services.currency_service import display_state
 
     aid = asset["id"]
     # Escaped once here so every interpolation below is safe.
-    disp_cur = e(_display_state["currency"])
-    disp_sym = e(_display_state["symbol"])
-    disp_mult = _display_state["multiplier"]
+    disp_cur = e(display_state()["currency"])
+    disp_sym = e(display_state()["symbol"])
+    disp_mult = display_state()["multiplier"]
     current_usd = asset.get("current_value_usd") or asset.get("value_usd") or 0
     disp_val = current_usd * disp_mult
 
     if asset["currency"] != "USD":
         native = f"{e(asset['currency'])} {asset['value']:,.0f}"
-        if asset["currency"] == _display_state["currency"]:
+        if asset["currency"] == display_state()["currency"]:
             main = native
         else:
             main = f'{native} <div class="text-muted" style="font-size:11px">{disp_sym}{disp_val:,.0f} {disp_cur}</div>'
@@ -399,11 +399,12 @@ def _value_cell_html(asset: dict) -> str:
     if asset.get("ticker"):
         qty = f" {asset['quantity']:,.0f}" if asset.get("quantity") else ""
         ticker_line = f'<div class="text-muted" style="font-size:11px; margin-top:2px">{e(asset["ticker"])}{qty}</div>'
+    tone = " text-negative" if asset.get("category") == "debt" else ""
     return f"""<td id="value-cell-{aid}" class="text-right"
     hx-get="/assets/{aid}/inline-edit"
     hx-target="#value-cell-{aid}" hx-swap="outerHTML"
     style="cursor:pointer" title="Click to record new value">
-    <div class="mono" style="font-size:15px; font-weight:600">{main}</div>
+    <div class="mono{tone}" style="font-size:15px; font-weight:600">{main}</div>
     {ticker_line}
 </td>"""
 
@@ -414,14 +415,14 @@ def _value_cell_html(asset: dict) -> str:
 async def _build_value_oob_html(db, asset_id: int) -> str:
     """Build HTMX OOB swap fragments: header value, stats cards, and chart data update."""
     from ..services.currency_service import CURRENCY_SYMBOLS as _CURRENCY_SYMBOLS
-    from ..services.currency_service import _display_state
+    from ..services.currency_service import display_state
 
     asset = await asset_service.get_asset(asset_id)
     if not asset:
         return ""
 
     current_usd = asset.get("current_value_usd") or asset.get("value_usd") or 0
-    state = _display_state
+    state = display_state()
     # Escaped once here so every interpolation below is safe.
     disp_sym = e(state["symbol"])
     disp_mult = state["multiplier"]
@@ -451,9 +452,12 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
             f"{sym}{(asset.get('value') or 0):,.0f} {e(asset['currency'])}</div>\n"
         )
 
+    # Keep in step with assets/detail.html, which hides both badges for debts.
+    is_debt = asset.get("category") == "debt"
+
     tax_html = ""
     estimated_tax = asset.get("estimated_tax")
-    if estimated_tax:
+    if estimated_tax and not is_debt:
         tax_html = (
             f'<span style="background: rgba(245,158,11,0.15); color: #f59e0b; '
             f'border-radius: 12px; padding: 2px 10px; font-size: 12px; font-weight: 600;">'
@@ -463,7 +467,7 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
     gain_html = ""
     gain_loss = asset.get("gain_loss")
     gain_loss_pct = asset.get("gain_loss_pct")
-    if gain_loss is not None:
+    if gain_loss is not None and not is_debt:
         g_cls = "text-positive" if gain_loss > 0 else "text-negative"
         pct_str = f" ({gain_loss_pct:+.1f}%)" if gain_loss_pct is not None else ""
         disp_gain = (gain_loss or 0) * disp_mult
@@ -575,11 +579,11 @@ async def _sync_asset_value_from_latest_snapshot(db, asset_id: int):
 
 
 def _snap_display_row(snap: dict, has_ticker: bool, ticker: str = "") -> str:
-    from ..services.currency_service import _display_state
+    from ..services.currency_service import display_state
 
     sid = snap["id"]
-    disp_sym = e(_display_state["symbol"])
-    disp_mult = _display_state["multiplier"]
+    disp_sym = e(display_state()["symbol"])
+    disp_mult = display_state()["multiplier"]
     converted = (snap["value_usd"] or 0) * disp_mult
     val_fmt = f"{disp_sym}{converted:,.2f}"
     ticker_cell = f'<td class="text-muted mono">{e(ticker)}</td>' if has_ticker else ""

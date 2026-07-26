@@ -23,12 +23,12 @@ Vendored under `app/static/vendor/` and served locally. Nothing is loaded from
 a CDN, so rendering a page makes no third-party requests and the UI works
 offline.
 
-| Asset                     | Version  | License                |
-|---------------------------|----------|------------------------|
-| Chart.js                  | 4.4.4    | MIT                    |
-| htmx                      | vendored | Zero-Clause BSD (0BSD) |
-| Inter (variable woff2)     | v20      | SIL Open Font License 1.1 |
-| Roboto Mono (variable woff2) | v31    | Apache License 2.0     |
+| Asset                        | Version  | License                   |
+|------------------------------|----------|---------------------------|
+| Chart.js                     | 4.4.4    | MIT                       |
+| htmx                         | vendored | Zero-Clause BSD (0BSD)    |
+| Inter (variable woff2)       | v20      | SIL Open Font License 1.1 |
+| Roboto Mono (variable woff2) | v31      | Apache License 2.0        |
 
 The font files live in `app/static/vendor/fonts/` with `fonts.css` declaring
 the `@font-face` rules. Subsets included: latin, latin-ext, cyrillic,

@@ -1,13 +1,44 @@
+{# Reconciliation first, so the percentages below have an unambiguous base. #}
+<div style="margin-bottom:16px; padding-bottom:14px; border-bottom:1px solid var(--border)">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; padding:3px 0">
+        <span style="font-size:12px; color:var(--text-secondary)">Assets</span>
+        <span class="mono" style="font-size:13px; color:var(--text-primary)">{{ total_assets | format_display }}</span>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:baseline; padding:3px 0">
+        <span style="font-size:12px; color:var(--text-secondary)">Debts</span>
+        <span class="mono text-negative" style="font-size:13px">
+            {% if total_debts > 0 %}−{% endif %}{{ total_debts | format_display }}
+        </span>
+    </div>
+    <div style="display:flex; justify-content:space-between; align-items:baseline; padding:7px 0 0; margin-top:5px; border-top:1px solid var(--border)">
+        <span style="font-size:12px; color:var(--text-primary); font-weight:600">Net worth</span>
+        <span class="mono" style="font-size:15px; font-weight:700; color:var(--text-primary)">{{ net_worth | format_display }}</span>
+    </div>
+</div>
+
+<div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.6px; margin-bottom:10px">
+    Top holdings <span style="text-transform:none; letter-spacing:0; color:var(--text-muted)">· % of assets</span>
+</div>
 {% for asset in top_assets %}
 <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
     <span style="font-size:12px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58%; display:block">{{ asset.name }}</span>
     <div style="text-align:right; flex-shrink:0">
         <span class="mono" style="font-size:12px; color:var(--text-primary)">{{ asset.current_value_usd | format_display }}</span>
-        {% if total > 0 %}
-        <span style="font-size:10px; color:var(--text-muted); margin-left:5px">{{ "{:.1f}".format(asset.current_value_usd / total * 100) }}%</span>
+        {% if total_assets > 0 %}
+        <span style="font-size:10px; color:var(--text-muted); margin-left:5px">{{ "{:.1f}".format(asset.current_value_usd / total_assets * 100) }}%</span>
         {% endif %}
     </div>
 </div>
 {% else %}
 <span style="font-size:12px; color:var(--text-muted)">No assets</span>
 {% endfor %}
+
+{% if debts_by_name %}
+<div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; letter-spacing:0.6px; margin:16px 0 10px">Debts</div>
+{% for name, amount in debts_by_name.items() %}
+<div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0{% if not loop.last %}; border-bottom:1px solid var(--border){% endif %}">
+    <span style="font-size:12px; color:var(--text-secondary); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:58%; display:block">{{ name }}</span>
+    <span class="mono text-negative" style="font-size:12px; flex-shrink:0">−{{ amount | format_display }}</span>
+</div>
+{% endfor %}
+{% endif %}

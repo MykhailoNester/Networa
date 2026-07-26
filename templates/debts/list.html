@@ -2,40 +2,153 @@
 {% block title %}Debts - Networa{% endblock %}
 
 {% block content %}
-<div class="page-header">
+<div class="page-header" style="margin-bottom: 20px;">
     <h1>Debts</h1>
-    <span class="mono" style="font-size: 20px; font-weight: 700; color: var(--negative);">${{ "{:,.0f}".format(total_value) }}</span>
+    <span class="mono" style="font-size: 20px; font-weight: 700; color: var(--negative);">{{ total_value | format_display }}</span>
 </div>
 
-{% if debts %}
-<div class="card">
+<p class="text-muted" style="font-size:13px; margin:-8px 0 20px">
+    Balances owed. Entered as positive amounts and subtracted from your assets to give net worth.
+</p>
+
+<div class="card" style="padding:0; overflow:hidden;">
     <div class="table-container">
         <table>
             <thead>
                 <tr>
-                    <th>Name</th>
+                    <th>Debt</th>
                     <th>Class</th>
-                    <th class="text-right">Value</th>
-                    <th class="text-right">Value (USD)</th>
+                    <th class="text-right" style="width:160px">Balance</th>
                 </tr>
             </thead>
             <tbody>
+                {% if debts %}
                 {% for debt in debts %}
-                <tr style="cursor: pointer" onclick="location.href='/assets/{{ debt.id }}'">
-                    <td><strong>{{ debt.name }}</strong></td>
-                    <td><span class="badge badge-debt">{{ debt.asset_class }}</span></td>
-                    <td class="text-right mono">{{ debt.currency }} {{ "{:,.0f}".format(debt.value) }}</td>
-                    <td class="text-right mono text-negative">${{ "{:,.0f}".format(debt.value_usd) }}</td>
+                <tr>
+                    <td style="cursor:pointer" onclick="location.href='/assets/{{ debt.id }}'">
+                        <div style="font-size:14px; font-weight:500; color:var(--text-primary)">{{ debt.name }}</div>
+                        {% if debt.description %}
+                        <div class="text-muted" style="font-size:12px; margin-top:1px">{{ debt.description }}</div>
+                        {% endif %}
+                    </td>
+                    <td style="cursor:pointer" onclick="location.href='/assets/{{ debt.id }}'">
+                        <span class="text-muted" style="font-size:13px">{{ debt.asset_class | replace('_', ' ') | title }}</span>
+                        {% if debt.sheet_name %}
+                        <div class="text-muted" style="font-size:11px; margin-top:1px">{{ debt.sheet_name }}</div>
+                        {% endif %}
+                    </td>
+                    <td id="value-cell-{{ debt.id }}" class="text-right"
+                        hx-get="/assets/{{ debt.id }}/inline-edit"
+                        hx-target="#value-cell-{{ debt.id }}" hx-swap="outerHTML"
+                        style="cursor:pointer" title="Click to record a new balance">
+                        <div class="mono text-negative" style="font-size:15px; font-weight:600">
+                            {% if debt.currency != 'USD' %}
+                            {{ debt.value | format_currency(debt.currency) }}
+                            {% if debt.currency != display_currency %}
+                            <div class="text-muted" style="font-size:11px">{{ debt.current_value_usd | format_display }} {{ display_currency }}</div>
+                            {% endif %}
+                            {% else %}
+                            {{ debt.current_value_usd | format_display }}
+                            {% endif %}
+                        </div>
+                    </td>
                 </tr>
                 {% endfor %}
+                <tr style="background:var(--bg-secondary);">
+                    <td>
+                        <button class="btn" style="color:var(--text-secondary); background:none; border:none; padding:4px 0; cursor:pointer; font-size:13px; font-weight:500; letter-spacing:0.2px"
+                                onclick="document.getElementById('addDebtModal').style.display='flex'">
+                            + ADD DEBT
+                        </button>
+                    </td>
+                    <td></td>
+                    <td class="text-right mono text-negative" style="font-size:15px; font-weight:700">
+                        {{ total_value | format_display }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3" style="text-align:center; padding:48px 20px; color:var(--text-secondary)">
+                        No debts tracked — your net worth equals your assets.
+                        <button class="btn btn-primary btn-sm" style="margin-left:12px"
+                                onclick="document.getElementById('addDebtModal').style.display='flex'">+ Add Debt</button>
+                    </td>
+                </tr>
+                {% endif %}
             </tbody>
         </table>
     </div>
 </div>
-{% else %}
-<div class="card empty-state">
-    <h3>No debts</h3>
-    <p>You're debt-free. Add a debt if needed.</p>
+
+<!-- Add Debt Modal. Posts to the shared /assets/create handler with category=debt. -->
+<div id="addDebtModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; justify-content:center; align-items:center;">
+    <div class="card" style="width: 480px; max-height: 85vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 style="font-size: 18px;">Add Debt</h2>
+            <button class="btn btn-sm" onclick="document.getElementById('addDebtModal').style.display='none'">&times;</button>
+        </div>
+        <form action="/assets/create" method="post">
+            <input type="hidden" name="category" value="debt">
+            <input type="hidden" name="investable" value="non_investable">
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" name="name" required placeholder="e.g. Mortgage, Car Loan, Credit Card">
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Class</label>
+                    <select name="asset_class">
+                        {% for cls in asset_classes %}
+                        <option value="{{ cls.name }}" {% if cls.name == 'miscellaneous' %}selected{% endif %}>{{ cls.display_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Sheet</label>
+                    <select name="sheet_id">
+                        <option value="">-- None --</option>
+                        {% for sheet in sheets %}
+                        <option value="{{ sheet.id }}">{{ sheet.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Balance Owed</label>
+                    <input type="number" name="value" step="0.01" value="0" min="0">
+                </div>
+                <div class="form-group">
+                    <label>Currency</label>
+                    <select name="currency">
+                        {% for cur in ['USD', 'EUR', 'UAH', 'GBP', 'CHF'] %}
+                        <option value="{{ cur }}">{{ cur }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Description <span class="text-muted">(optional)</span></label>
+                <input type="text" name="description" placeholder="Short description">
+            </div>
+            <p class="text-muted" style="font-size:12px; margin:4px 0 12px">
+                Enter the balance as a positive number — it is subtracted from your assets.
+            </p>
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px;">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('addDebtModal').style.display='none'">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Debt</button>
+            </div>
+        </form>
+    </div>
 </div>
-{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('addDebtModal').addEventListener('click', function(e) {
+        if (e.target === this) this.style.display = 'none';
+    });
+});
+</script>
 {% endblock %}

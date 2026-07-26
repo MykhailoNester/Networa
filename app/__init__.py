@@ -14,7 +14,7 @@ from .services.sample_data import maybe_seed_sample_data
 
 
 @asynccontextmanager
-async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Startup
     await init_db()
     if settings.SEED_SAMPLE_DATA:
@@ -46,7 +46,7 @@ def _format_display(value, decimals: int = 0) -> str:
     """Convert a USD value to the active display currency and format it."""
     if value is None:
         return "—"
-    state = currency_service._display_state
+    state = currency_service.display_state()
     converted = value * state["multiplier"]
     symbol = state["symbol"]
     fmt = f"{converted:,.{decimals}f}"
@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
         assets,
         cashflows,
         dashboard,
+        debts,
         exchange_rates,
         import_data,
         sheets,
@@ -80,6 +81,7 @@ def create_app() -> FastAPI:
 
     app.include_router(dashboard.router)
     app.include_router(assets.router)
+    app.include_router(debts.router)
     app.include_router(sheets.router)
     app.include_router(cashflows.router)
     app.include_router(snapshots.router)
@@ -102,7 +104,7 @@ templates.env.globals["display_multiplier"] = 1.0
 
 def _sync_display_globals():
     """Copy the module-level display state into Jinja2 globals."""
-    state = currency_service._display_state
+    state = currency_service.display_state()
     templates.env.globals["display_currency"] = state["currency"]
     templates.env.globals["display_symbol"] = state["symbol"]
     templates.env.globals["display_multiplier"] = state["multiplier"]

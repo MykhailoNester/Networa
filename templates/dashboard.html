@@ -8,21 +8,32 @@
 
 <!-- Summary Cards -->
 <div class="cards-row" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr))">
-    <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/networth', 'Top Holdings')">
+    <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/networth', 'Net Worth Breakdown')">
         <div class="label">Net Worth</div>
         <div class="value">{{ data.net_worth | format_display }}</div>
         {% if data.ytd_change is not none %}
         <div class="change {% if data.ytd_change >= 0 %}text-positive{% else %}text-negative{% endif %}">
             {% if data.ytd_change >= 0 %}+{% endif %}{{ data.ytd_change | format_display }}
-            ({{ "%+.1f" | format(data.ytd_change_pct) }}% YTD)
+            {% if data.ytd_change_pct is not none %}({{ "%+.1f" | format(data.ytd_change_pct) }}% YTD){% else %}YTD{% endif %}
         </div>
         {% endif %}
-        <div class="bd-hint">↗ top holdings</div>
+        <div class="bd-hint">↗ assets − debts</div>
     </div>
     <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/assets', 'Assets by Class')">
         <div class="label">Assets</div>
-        <div class="value text-muted" style="font-size:28px">{{ data.assets_count }}</div>
+        <div class="value">{{ data.total_assets | format_display }}</div>
+        <div class="change text-muted">{{ data.assets_count }} tracked</div>
         <div class="bd-hint">↗ by class</div>
+    </div>
+    <div class="card stat-card bd-clickable" onclick="location.href='/debts'">
+        <div class="label">Debts</div>
+        <div class="value {% if data.total_debts > 0 %}text-negative{% else %}text-muted{% endif %}">
+            {% if data.total_debts > 0 %}−{% endif %}{{ data.total_debts | format_display }}
+        </div>
+        <div class="change text-muted">
+            {% if data.debts_count %}{{ data.debts_count }} tracked{% else %}none tracked{% endif %}
+        </div>
+        <div class="bd-hint">↗ manage debts</div>
     </div>
     <div class="card stat-card bd-clickable" onclick="openBreakdown('/breakdown/investable', 'Investable Breakdown')">
         <div class="label">Investable</div>
@@ -36,23 +47,35 @@
 
 <!-- Period Returns Row -->
 {% if period_returns %}
+{# `change` is falsy for both "unknown" and "exactly zero": with nothing to
+   attribute, the contributor drill-through would open an empty modal. #}
 {% macro pct_card(label, val, change, period_key) %}
-<div class="card stat-card{% if val is not none %} bd-clickable{% endif %}"
-     {% if val is not none %}onclick="openBreakdown('/breakdown/period/{{ period_key }}', '{{ label }} Contributors')"{% endif %}>
+<div class="card stat-card{% if change %} bd-clickable{% endif %}"
+     {% if change %}onclick="openBreakdown('/breakdown/period/{{ period_key }}', '{{ label }} Contributors')"{% endif %}>
     <div class="label">{{ label }}</div>
     {% if val is not none %}
-    <div class="value {% if val >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:22px">
+    <div class="value {% if not change %}text-muted{% elif val >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:22px">
         {{ "%+.2f" | format(val) }}%
     </div>
-    {% if change is not none %}
+    {% if change %}
     <div class="change {% if change >= 0 %}text-positive{% else %}text-negative{% endif %}">
         {% if change >= 0 %}+{% endif %}{{ change | format_display }}
     </div>
+    {% else %}
+    <div class="change text-muted">no change</div>
     {% endif %}
-    <div class="bd-hint">↗ who contributed</div>
+    {% elif change is not none %}
+    {# Net worth was zero or negative at the reference date, so a percentage
+       would be meaningless — but the absolute change still is not. #}
+    <div class="value {% if not change %}text-muted{% elif change >= 0 %}text-positive{% else %}text-negative{% endif %}" style="font-size:22px">
+        {% if change >= 0 %}+{% endif %}{{ change | format_display }}
+    </div>
+    <div class="change text-muted">% n/a from a base of $0 or less</div>
     {% else %}
     <div class="value text-muted" style="font-size:16px">—</div>
+    <div class="change text-muted">no data this far back</div>
     {% endif %}
+    {% if change %}<div class="bd-hint">↗ who contributed</div>{% endif %}
 </div>
 {% endmacro %}
 <div class="cards-row" style="grid-template-columns: repeat(5, 1fr); margin-bottom: 24px">
@@ -156,7 +179,7 @@
         </div>
         <div style="flex:1; min-width:200px">
             <div class="investable-bar">
-                <div class="investable-bar-fill" style="width:{{ "{:.1f}".format(inv_pct) }}%"></div>
+                <div class="investable-bar-fill" style="width:{{ '{:.1f}'.format(inv_pct) }}%"></div>
             </div>
         </div>
         <div style="text-align:right">
@@ -177,7 +200,7 @@
             <span style="width:8px; height:8px; border-radius:50%; background:{{ color }}; flex-shrink:0"></span>
             <span style="font-size:13px; color:var(--text-secondary); width:120px">{{ label }}</span>
             <div style="flex:1; height:4px; background:var(--bg-hover); border-radius:2px; overflow:hidden">
-                <div style="height:100%; width:{{ "{:.1f}".format(pct) }}%; background:{{ color }}; border-radius:2px"></div>
+                <div style="height:100%; width:{{ '{:.1f}'.format(pct) }}%; background:{{ color }}; border-radius:2px"></div>
             </div>
             <span class="mono" style="font-size:13px; color:var(--text-primary); width:100px; text-align:right">{{ amount | format_display }}</span>
             <span style="font-size:12px; color:var(--text-muted); width:40px; text-align:right">{{ "{:.1f}".format(pct) }}%</span>
@@ -197,7 +220,9 @@
                 <tr>
                     <th>Class</th>
                     <th class="text-right">Value ({{ display_currency }})</th>
-                    <th class="text-right">% of Total</th>
+                    {# Denominated by gross assets, not net worth — these are
+                       composition shares and must sum to 100%. #}
+                    <th class="text-right">% of Assets</th>
                 </tr>
             </thead>
             <tbody>
@@ -333,7 +358,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const displayMultiplier = {{ display_multiplier }};
     const displaySymbol = {{ display_symbol | tojson }};
 
-    // --- Net Worth History Chart ---
     const ctx = document.getElementById('netWorthChart');
     let netWorthChart = null;
 
@@ -380,7 +404,6 @@ document.addEventListener('DOMContentLoaded', function() {
             pointHoverBorderWidth: 2,
         }];
 
-        // Collect all investable types that appear across snapshots
         const allTypes = new Set();
         data.forEach(h => { if (h.investable_breakdown) Object.keys(h.investable_breakdown).forEach(t => allTypes.add(t)); });
 
@@ -469,7 +492,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- Allocation by Class Donut ---
     const classCtx = document.getElementById('allocationClassChart');
     if (classCtx) {
         const classData = {{ data.allocation_by_class | tojson }};
@@ -492,7 +514,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- Stacked Horizontal Bar by Sheet ---
     const sheetCtx = document.getElementById('sheetBarChart');
     if (sheetCtx) {
         const sheetData = {{ data.allocation_by_sheet | tojson }};
@@ -530,7 +551,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
 
-        // Custom legend
         const legend = document.getElementById('sheet-legend');
         if (legend) {
             keys.forEach((k, i) => {
