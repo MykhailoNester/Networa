@@ -65,6 +65,11 @@ data/                   # SQLite databases: networa.db (default, gitignored) + d
 - **No authentication** — single-user, self-hosted deployment. Because of that, `app/security.py` rejects state-changing requests a browser reports as cross-origin, and restricts the `Host` header to block DNS rebinding. The host rule turns on *names*, not addresses: every IP literal and `localhost` are always allowed (they cannot be repointed), while other hostnames need `ALLOWED_HOSTS`. Non-browser clients are unaffected.
 - **Escaping is manual in router-built HTML.** Some HTMX fragments are assembled as f-strings, where Jinja's autoescaping does not apply. Every interpolated DB value must go through `app.html.e()`, and any JSON embedded in a `<script>` block through `app.html.json_for_script()`. Prefer adding new fragments as Jinja partials under `templates/` instead.
 - No third-party requests to render the UI: fonts, HTMX and Chart.js are all vendored under `app/static/vendor/`. Don't reintroduce a CDN link.
+- **Every chart goes through `app/static/js/charts.js` (`window.NetworaCharts`).** It owns the
+  hover behaviour (whole-x-position tooltips), the per-record point markers, the dark tooltip
+  theme and money formatting, so charts stay consistent instead of each one re-deciding. Chart
+  data is always converted to the display currency before it reaches Chart.js — the server
+  sends USD.
 - Schema is initialized automatically from the single `app/schema.sql` on first run (idempotent; there is no migrations directory). Note this cannot add a column to an existing table — adding one needs a real migration step.
 - SQLite pragmas applied at startup: `PRAGMA journal_mode=WAL`, `PRAGMA foreign_keys=ON`.
 - 9 asset classes are pre-seeded (stocks, real estate, crypto, etc.).

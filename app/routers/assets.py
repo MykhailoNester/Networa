@@ -161,6 +161,21 @@ async def asset_detail_page(request: Request, asset_id: int):
     cf_total_in = sum((cf.get("cash_in_usd") or 0) for cf in cashflows)
     cf_total_out = sum((cf.get("cash_out_usd") or 0) for cf in cashflows)
 
+    # The VALUE tab records amounts in the asset's own currency, so it needs that
+    # currency's symbol and rate to label the input and preview the conversion.
+    from ..services import currency_service
+
+    asset_currency = asset.get("currency") or "USD"
+    asset_symbol = currency_service.CURRENCY_SYMBOLS.get(
+        asset_currency.upper(), asset_currency + " "
+    )
+    asset_usd_rate = await currency_service.get_rate(asset_currency, "USD")
+    current_value_native = (
+        asset.get("value")
+        if asset_currency != "USD"
+        else (asset.get("value") or current_value_usd)
+    ) or 0
+
     return templates.TemplateResponse(
         request,
         "assets/detail.html",
@@ -168,6 +183,9 @@ async def asset_detail_page(request: Request, asset_id: int):
             "request": request,
             "asset": asset,
             "current_value_usd": current_value_usd,
+            "current_value_native": current_value_native,
+            "asset_symbol": asset_symbol,
+            "asset_usd_rate": asset_usd_rate,
             "cf_total_in": cf_total_in,
             "cf_total_out": cf_total_out,
             "sheets": sheets,
@@ -551,12 +569,9 @@ async def _build_value_oob_html(db, asset_id: int) -> str:
         f'<div id="snap-chart-data" hx-swap-oob="true" style="display:none">'
         f"<script>"
         f"snapData={snaps_json};"
-        f"if(activeChart){{"
-        f"var _f=filterSnapshots(currentRange);"
-        f"activeChart.data.labels=_f.map(function(s){{return s.snapshot_date;}});"
-        f"activeChart.data.datasets[0].data=_f.map(function(s){{return s.value_usd;}});"
-        f"activeChart.update();"
-        f"}}"
+        # Redrawing belongs to the page, not to this fragment: the template owns
+        # the display-currency conversion and the point-marker sizing.
+        f"if(window.updateAssetChart)updateAssetChart();"
         f"</script>"
         f"</div>\n"
     )
@@ -579,19 +594,29 @@ async def _sync_asset_value_from_latest_snapshot(db, asset_id: int):
 
 
 def _snap_display_row(snap: dict, has_ticker: bool, ticker: str = "") -> str:
-    from ..services.currency_service import display_state
+    from ..services.currency_service import CURRENCY_SYMBOLS, display_state
 
     sid = snap["id"]
-    disp_sym = e(display_state()["symbol"])
-    disp_mult = display_state()["multiplier"]
-    converted = (snap["value_usd"] or 0) * disp_mult
+    state = display_state()
+    disp_sym = e(state["symbol"])
+    converted = (snap["value_usd"] or 0) * state["multiplier"]
     val_fmt = f"{disp_sym}{converted:,.2f}"
+    # Mirrors templates/assets/detail.html: show what was actually recorded
+    # whenever that is not what the column is denominated in.
+    snap_cur = (snap.get("currency") or "USD").upper()
+    native_line = ""
+    if snap_cur != state["currency"]:
+        nat_sym = e(CURRENCY_SYMBOLS.get(snap_cur, snap_cur + " "))
+        native_line = (
+            f'<div class="text-muted mono" style="font-size: 11px;">'
+            f"{nat_sym}{(snap.get('value') or 0):,.2f} {e(snap_cur)}</div>"
+        )
     ticker_cell = f'<td class="text-muted mono">{e(ticker)}</td>' if has_ticker else ""
     return f"""
 <tr id="snap-row-{sid}">
     <td class="mono">{e(snap["snapshot_date"])}</td>
     {ticker_cell}
-    <td class="text-right mono">{val_fmt}</td>
+    <td class="text-right mono">{val_fmt}{native_line}</td>
     <td>
         <div style="display:flex; gap:4px">
             <button class="btn btn-sm btn-secondary"
@@ -626,14 +651,23 @@ async def snapshot_edit_row(asset_id: int, snapshot_id: int):
     has_ticker = bool(asset and asset.get("ticker"))
     ticker = asset.get("ticker", "") if asset else ""
     ticker_cell = f'<td class="text-muted mono">{e(ticker)}</td>' if has_ticker else ""
+    # Edited in the currency the row was recorded in — the same currency the Add
+    # form takes — so the USD figure stays derived rather than typed.
+    snap_cur = (snap.get("currency") or "USD").upper()
+    native = snap.get("value")
+    if native is None:
+        native = snap.get("value_usd") or 0
     return HTMLResponse(f"""
 <tr id="snap-row-{snapshot_id}">
     <td class="mono">{e(snap["snapshot_date"])}</td>
     {ticker_cell}
     <td>
-        <input type="number" name="value_usd" id="snap-val-{snapshot_id}"
-               step="0.01" value="{snap["value_usd"]}"
-               style="width:130px; text-align:right">
+        <div style="display:flex; gap:4px; align-items:center; justify-content:flex-end">
+            <input type="number" name="value" id="snap-val-{snapshot_id}"
+                   step="0.01" value="{native}"
+                   style="width:130px; text-align:right">
+            <span class="text-muted mono" style="font-size:12px">{e(snap_cur)}</span>
+        </div>
     </td>
     <td>
         <div style="display:flex; gap:4px">
@@ -661,13 +695,27 @@ async def snapshot_edit_row(asset_id: int, snapshot_id: int):
 )
 async def snapshot_edit_save(asset_id: int, snapshot_id: int, request: Request):
     from ..database import get_db
+    from ..services import currency_service
 
     form = await request.form()
-    value_usd = get_float(form, "value_usd")
+    value = get_float(form, "value")
     db = await get_db()
+
+    # The row keeps the currency it was recorded in; only the USD figure is
+    # recomputed, at the current rate.
+    cursor = await db.execute(
+        "SELECT currency FROM snapshots WHERE id = ? AND asset_id = ?",
+        (snapshot_id, asset_id),
+    )
+    existing = await cursor.fetchone()
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    currency = (existing["currency"] or "USD").upper()
+    value_usd = round(await currency_service.convert_to_usd(value, currency), 2)
+
     await db.execute(
         "UPDATE snapshots SET value = ?, value_usd = ? WHERE id = ? AND asset_id = ?",
-        (value_usd, value_usd, snapshot_id, asset_id),
+        (value, value_usd, snapshot_id, asset_id),
     )
     await _sync_asset_value_from_latest_snapshot(db, asset_id)
     await db.commit()
@@ -799,15 +847,35 @@ async def snapshot_add_auto(asset_id: int, request: Request):
 
 @router.post("/assets/{asset_id}/snapshots/add", response_class=HTMLResponse)
 async def snapshot_add(asset_id: int, request: Request):
+    """Record a new value, entered in the asset's own currency.
+
+    The form posts ``value`` in that currency and USD is derived here — an EUR
+    asset used to have its EUR figure written straight into ``value_usd``, which
+    then read back through the display conversion as a different number.
+    """
     from ..database import get_db
+    from ..services import currency_service
 
     form = await request.form()
     snapshot_date = get_str(form, "snapshot_date") or date.today().isoformat()  # noqa: DTZ011 - local calendar date
-    value_usd = get_float(form, "value_usd")
+    if "value" not in form:
+        # Better a visible 400 than a silent zero overwriting today's value.
+        raise HTTPException(
+            status_code=400,
+            detail="Missing 'value' — the amount in the asset's own currency",
+        )
+    value = get_float(form, "value")
+
+    asset = await asset_service.get_asset(asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    currency = asset.get("currency") or "USD"
+    value_usd = round(await currency_service.convert_to_usd(value, currency), 2)
+
     db = await get_db()
     await db.execute(
-        "INSERT OR REPLACE INTO snapshots (snapshot_date, asset_id, value, currency, value_usd) VALUES (?, ?, ?, 'USD', ?)",
-        (snapshot_date, asset_id, value_usd, value_usd),
+        "INSERT OR REPLACE INTO snapshots (snapshot_date, asset_id, value, currency, value_usd) VALUES (?, ?, ?, ?, ?)",
+        (snapshot_date, asset_id, value, currency, value_usd),
     )
     await _sync_asset_value_from_latest_snapshot(db, asset_id)
     await db.commit()

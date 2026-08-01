@@ -45,6 +45,16 @@ You decide which tasks run in parallel and which must be sequenced, per the
 hard-dependency rule in the protocol. A task chained behind another is based on
 that task's **branch**, not on `develop`.
 
+## Sizing what you accept
+
+Every task costs roughly six to eight agent invocations across its stages, and
+the whole run shares one account budget. **Five `L`-sized tasks is the practical
+ceiling** — that is where this pipeline first hit a session limit mid-implement.
+
+Prefer more waves of smaller tasks over one wide wave of large ones. If the
+request is larger than that, say so, run the first slice, and name what you left
+for the next run rather than starting a batch that will die halfway.
+
 ## Before you start
 
 Print the plan you intend to run — tasks, branch names, bases, and which are
@@ -59,5 +69,16 @@ already exists, or a missing `$REPO/.venv`.
 Report with the protocol's final-report table: task, branch, base, status,
 commit, rounds. Say plainly what failed and what was skipped, name any chained
 branches and the order to review them in, and give the `git checkout` lines.
+Call out anything that needs a migration step or adds a dependency, and surface
+a teardown that refused — it names what is still uncommitted.
 
 Never push. Never open a pull request. Never merge or rebase onto `develop`.
+
+## If the run dies, or comes back with failures
+
+**Do not resume, in either mode.** `resumeFromRunId` does not reliably replay
+here and can commit an already-committed task a second time; the recovery is
+manual, and the protocol's "Never resume. Finish by hand." section is the whole
+of it. Read the preserved worktree and artifacts, finish only the outstanding
+stages, and check the protocol's "Failure modes that are not code failures"
+before concluding a task failed on its merits.

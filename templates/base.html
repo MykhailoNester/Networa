@@ -8,6 +8,9 @@
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="/static/vendor/htmx.min.js" defer></script>
     <script src="/static/vendor/chart.min.js" defer></script>
+    {# Deferred scripts run in document order, so NetworaCharts is defined
+       against a Chart.js that is already loaded. #}
+    <script src="/static/js/charts.js" defer></script>
 </head>
 <body>
     <!-- Mobile Top Bar -->

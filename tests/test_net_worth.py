@@ -275,8 +275,8 @@ def test_a_flat_period_reads_as_zero_not_as_missing_data(on_fresh_db):
     """Unchanged and "no history that far back" are different answers.
 
     Collapsing both into None made the MTD and QTD cards show an em dash on a
-    portfolio whose newest snapshot was simply the one taken at the start of the
-    month — indistinguishable from having no history at all.
+    portfolio that simply had not moved — indistinguishable from having no
+    history at all.
     """
 
     async def body(db):
@@ -285,12 +285,14 @@ def test_a_flat_period_reads_as_zero_not_as_missing_data(on_fresh_db):
             "VALUES ('Fund', 'asset', 'fund', 50000, 50000)"
         )
         today = date.today()  # noqa: DTZ011 - matches the service's local-date basis
-        # Valued at the start of the month and untouched since: flat, not unknown.
-        await db.execute(
-            "INSERT INTO snapshots (snapshot_date, asset_id, value, currency, value_usd) "
-            "VALUES (?, 1, 50000, 'USD', 50000)",
-            (today.replace(day=1).isoformat(),),
-        )
+        month_start = today.replace(day=1)
+        # Valued at last month's close and again this month, at the same figure.
+        for day in (month_start - timedelta(days=1), month_start):
+            await db.execute(
+                "INSERT INTO snapshots (snapshot_date, asset_id, value, currency, value_usd) "
+                "VALUES (?, 1, 50000, 'USD', 50000)",
+                (day.isoformat(),),
+            )
         await db.commit()
         return await ss.get_period_returns()
 
@@ -301,6 +303,41 @@ def test_a_flat_period_reads_as_zero_not_as_missing_data(on_fresh_db):
     # Nothing was snapshotted a year ago, so that period really is unknown.
     assert returns["one_year"] is None
     assert returns["one_year_change"] is None
+
+
+def test_mtd_measures_from_last_months_close_not_from_the_first(on_fresh_db):
+    """A value recorded on the 1st is this month's *change*, not its baseline.
+
+    Anchoring MTD on the first of the month put the new figure on both sides of
+    the subtraction, so a portfolio revalued on the 1st reported 0.00% MTD — the
+    one day of the month when people most reliably update their numbers.
+    """
+
+    async def body(db):
+        await db.execute(
+            "INSERT INTO assets (name, category, asset_class, value, value_usd) "
+            "VALUES ('Fund', 'asset', 'fund', 55000, 55000)"
+        )
+        today = date.today()  # noqa: DTZ011 - matches the service's local-date basis
+        month_start = today.replace(day=1)
+        for day, value in (
+            (month_start - timedelta(days=1), 50000),
+            (month_start, 55000),
+        ):
+            await db.execute(
+                "INSERT INTO snapshots (snapshot_date, asset_id, value, currency, value_usd) "
+                "VALUES (?, 1, ?, 'USD', ?)",
+                (day.isoformat(), value, value),
+            )
+        await db.commit()
+        return await ss.get_period_returns(), await ss.get_period_contributors("mtd")
+
+    returns, contributors = on_fresh_db(body)
+
+    assert returns["mtd_change"] == pytest.approx(5_000)
+    assert returns["mtd"] == pytest.approx(10.0)
+    # The breakdown behind the card has to agree with it.
+    assert sum(c["change"] for c in contributors) == pytest.approx(5_000)
 
 
 def test_returns_are_empty_for_an_empty_portfolio(on_fresh_db):

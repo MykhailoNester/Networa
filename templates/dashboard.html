@@ -398,56 +398,34 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!ctx) return;
         if (netWorthChart) netWorthChart.destroy();
 
-        const datasets = [{
+        const datasets = [NetworaCharts.lineDataset({
             label: 'Net Worth',
             data: data.map(h => h.net_worth_usd * displayMultiplier),
-            borderColor: '#6366f1',
-            backgroundColor: 'rgba(99, 102, 241, 0.1)',
+            color: '#6366f1',
             fill: true,
-            tension: 0.3,
-            pointRadius: data.length < 30 ? 3 : 0,
-            pointHoverRadius: 6,
-            pointHoverBackgroundColor: '#6366f1',
-            pointHoverBorderColor: '#fff',
-            pointHoverBorderWidth: 2,
-        }];
+            fillColor: 'rgba(99, 102, 241, 0.1)',
+        })];
 
         const allTypes = new Set();
         data.forEach(h => { if (h.investable_breakdown) Object.keys(h.investable_breakdown).forEach(t => allTypes.add(t)); });
 
         if (allTypes.size > 0) {
             allTypes.forEach(type => {
-                datasets.push({
+                datasets.push(NetworaCharts.lineDataset({
                     label: INVESTABLE_TYPE_LABELS[type] || type,
                     data: data.map(h => ((h.investable_breakdown && h.investable_breakdown[type]) || 0) * displayMultiplier),
-                    borderColor: INVESTABLE_TYPE_COLORS[type] || '#888',
-                    backgroundColor: 'transparent',
-                    borderDash: [5, 5],
-                    fill: false,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    pointHoverRadius: 5,
-                    pointHoverBackgroundColor: INVESTABLE_TYPE_COLORS[type] || '#888',
-                    pointHoverBorderColor: '#fff',
-                    pointHoverBorderWidth: 2,
-                });
+                    color: INVESTABLE_TYPE_COLORS[type] || '#888',
+                    dashed: true,
+                }));
             });
         } else if (data.some(h => h.investable_total_usd > 0)) {
             // Fallback for old snapshots without breakdown data
-            datasets.push({
+            datasets.push(NetworaCharts.lineDataset({
                 label: 'Investable',
                 data: data.map(h => (h.investable_total_usd || 0) * displayMultiplier),
-                borderColor: '#00bfa5',
-                backgroundColor: 'transparent',
-                borderDash: [5, 5],
-                fill: false,
-                tension: 0.3,
-                pointRadius: 0,
-                pointHoverRadius: 5,
-                pointHoverBackgroundColor: '#00bfa5',
-                pointHoverBorderColor: '#fff',
-                pointHoverBorderWidth: 2,
-            });
+                color: '#00bfa5',
+                dashed: true,
+            }));
         }
 
         const showLegend = datasets.length > 1;
@@ -460,28 +438,12 @@ document.addEventListener('DOMContentLoaded', function() {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                interaction: { mode: 'index', intersect: false },
+                interaction: NetworaCharts.INTERACTION,
                 plugins: {
                     legend: { display: showLegend, labels: { color: '#888', font: { size: 11 } } },
-                    tooltip: {
-                        backgroundColor: '#1e1e2e',
-                        borderColor: '#333',
-                        borderWidth: 1,
-                        titleColor: '#ccc',
-                        bodyColor: '#aaa',
-                        padding: 10,
-                        callbacks: {
-                            label: ctx => {
-                                const val = ctx.parsed.y;
-                                return ` ${ctx.dataset.label}: ${displaySymbol}${Math.round(val).toLocaleString()}`;
-                            }
-                        }
-                    }
+                    tooltip: NetworaCharts.moneyTooltip(displaySymbol)
                 },
-                scales: {
-                    x: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', maxTicksLimit: 8 } },
-                    y: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', callback: v => displaySymbol + v.toLocaleString() } }
-                }
+                scales: NetworaCharts.moneyScales(displaySymbol)
             }
         });
     }
@@ -516,7 +478,16 @@ document.addEventListener('DOMContentLoaded', function() {
             options: {
                 responsive: false,
                 plugins: {
-                    legend: { position: 'bottom', labels: { color: '#888', font: { size: 11 } } }
+                    legend: { position: 'bottom', labels: { color: '#888', font: { size: 11 } } },
+                    // Slice values are USD, like every other figure the server sends;
+                    // the display currency is applied here, at the point of reading.
+                    tooltip: NetworaCharts.tooltip(ctx => {
+                        const slices = ctx.dataset.data;
+                        const total = slices.reduce((a, b) => a + b, 0);
+                        const share = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : '0.0';
+                        const val = NetworaCharts.money(displaySymbol, ctx.parsed * displayMultiplier);
+                        return ` ${ctx.label}: ${val} (${share}%)`;
+                    })
                 }
             }
         });
@@ -546,11 +517,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 maintainAspectRatio: false,
                 plugins: {
                     legend: { display: false },
-                    tooltip: {
-                        callbacks: {
-                            label: ctx => ` ${ctx.dataset.label}: ${displaySymbol}${(ctx.raw * displayMultiplier).toLocaleString(undefined, {maximumFractionDigits:0})} (${(ctx.raw/total*100).toFixed(1)}%)`
-                        }
-                    }
+                    tooltip: NetworaCharts.tooltip(ctx =>
+                        ` ${ctx.dataset.label}: ${NetworaCharts.money(displaySymbol, ctx.raw * displayMultiplier)}`
+                        + ` (${total > 0 ? (ctx.raw / total * 100).toFixed(1) : '0.0'}%)`)
                 },
                 scales: {
                     x: { stacked: true, display: false },

@@ -241,26 +241,38 @@
 
     <!-- History table -->
     <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        {# The amount is entered in the asset's OWN currency and converted to USD
+           server-side, so the currency is spelled out beside the box and, for a
+           non-USD asset, previewed underneath. #}
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; gap: 12px; flex-wrap: wrap;">
             <h3 class="section-label" style="margin: 0;">{{ amount }} History</h3>
-            <div style="display: flex; gap: 6px; align-items: center;">
-                <input type="date" id="new-snap-date" name="snapshot_date" value="{{ today }}"
-                       style="padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px;">
-                <input type="number" id="new-snap-value" name="value_usd" step="0.01" min="0"
-                       value="{{ current_value_usd | round(2) }}" placeholder="Value (USD)"
-                       style="width: 130px; padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px; text-align: right;">
-                <button class="btn btn-sm btn-primary"
-                        hx-post="/assets/{{ asset.id }}/snapshots/add"
-                        hx-include="#new-snap-date, #new-snap-value"
-                        hx-target="#snap-tbody"
-                        hx-swap="innerHTML">Add</button>
-                {% if asset.currency != 'USD' or (asset.ticker and asset.quantity) %}
-                <button class="btn btn-sm btn-secondary"
-                        hx-post="/assets/{{ asset.id }}/snapshots/add-auto"
-                        hx-include="#new-snap-date"
-                        hx-target="#snap-tbody"
-                        hx-swap="innerHTML"
-                        title="{% if asset.ticker and asset.quantity %}Fetch {{ asset.ticker }} price from Yahoo Finance ({{ asset.quantity }} units){% else %}Add snapshot using NBU exchange rate for {{ asset.currency }}{% endif %}">Auto</button>
+            <div>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                    <input type="date" id="new-snap-date" name="snapshot_date" value="{{ today }}"
+                           style="padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px;">
+                    <span class="text-muted mono" style="font-size: 13px;">{{ asset_symbol }}</span>
+                    <input type="number" id="new-snap-value" name="value" step="0.01" min="0"
+                           value="{{ current_value_native | round(2) }}"
+                           placeholder="{{ amount }} in {{ asset.currency }}"
+                           title="Enter the {{ amount | lower }} in {{ asset.currency }} — Networa converts it to USD"
+                           style="width: 130px; padding: 4px 8px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); border-radius: 4px; font-size: 13px; text-align: right;">
+                    <span class="text-muted mono" style="font-size: 12px;">{{ asset.currency }}</span>
+                    <button class="btn btn-sm btn-primary"
+                            hx-post="/assets/{{ asset.id }}/snapshots/add"
+                            hx-include="#new-snap-date, #new-snap-value"
+                            hx-target="#snap-tbody"
+                            hx-swap="innerHTML">Add</button>
+                    {% if asset.currency != 'USD' or (asset.ticker and asset.quantity) %}
+                    <button class="btn btn-sm btn-secondary"
+                            hx-post="/assets/{{ asset.id }}/snapshots/add-auto"
+                            hx-include="#new-snap-date"
+                            hx-target="#snap-tbody"
+                            hx-swap="innerHTML"
+                            title="{% if asset.ticker and asset.quantity %}Fetch {{ asset.ticker }} price from Yahoo Finance ({{ asset.quantity }} units){% else %}Add snapshot using NBU exchange rate for {{ asset.currency }}{% endif %}">Auto</button>
+                    {% endif %}
+                </div>
+                {% if asset.currency != 'USD' %}
+                <div id="new-snap-hint" class="text-muted" style="font-size: 11px; margin-top: 4px; text-align: right;"></div>
                 {% endif %}
             </div>
         </div>
@@ -279,7 +291,16 @@
                     <tr id="snap-row-{{ s.id }}">
                         <td class="mono">{{ s.snapshot_date }}</td>
                         {% if asset.ticker %}<td class="text-muted mono">{{ asset.ticker }}</td>{% endif %}
-                        <td class="text-right mono">{{ s.value_usd | format_display }}</td>
+                        <td class="text-right mono">
+                            {{ s.value_usd | format_display(2) }}
+                            {# Show what was actually recorded whenever that is not
+                               what the column is denominated in. #}
+                            {% if (s.currency or 'USD') != display_currency %}
+                            <div class="text-muted mono" style="font-size: 11px;">
+                                {{ (s.value or 0) | format_currency(s.currency or 'USD', 2) }} {{ s.currency or 'USD' }}
+                            </div>
+                            {% endif %}
+                        </td>
                         <td>
                             <div style="display:flex; gap:4px">
                                 <button class="btn btn-sm btn-secondary"
@@ -695,6 +716,12 @@
 var snapData = {{ snapshots | tojson }};
 var activeChart = null;
 var currentRange = 'All';
+var displayMultiplier = {{ display_multiplier }};
+var displaySymbol = {{ display_symbol | tojson }};
+// The asset's own currency, and what one unit of it is worth in USD. Values are
+// entered natively and converted here only to preview what will be stored.
+var assetCurrency = {{ (asset.currency or 'USD') | tojson }};
+var assetUsdRate = {{ asset_usd_rate | tojson }};
 
 function showTab(name, btn) {
     // Not every tab exists for every category — a debt has no RETURNS panel, so
@@ -712,6 +739,18 @@ function showTab(name, btn) {
     if (name === 'value' && !activeChart) initChart('All');
 }
 
+function snapDatasets(rows) {
+    // Snapshots are stored in USD; the chart, the table and the header all read
+    // in the display currency, so convert here rather than in three places.
+    return [NetworaCharts.lineDataset({
+        label: '{{ amount }}',
+        data: rows.map(s => (s.value_usd || 0) * displayMultiplier),
+        color: '#8b5cf6',
+        fill: true,
+        fillColor: 'rgba(139,92,246,0.12)',
+    })];
+}
+
 function initChart(range) {
     var filtered = filterSnapshots(range);
     var ctx = document.getElementById('assetValueChart');
@@ -721,26 +760,30 @@ function initChart(range) {
         type: 'line',
         data: {
             labels: filtered.map(s => s.snapshot_date),
-            datasets: [{
-                label: 'Value (USD)',
-                data: filtered.map(s => s.value_usd),
-                borderColor: '#8b5cf6',
-                backgroundColor: 'rgba(139,92,246,0.12)',
-                fill: true,
-                tension: 0.3,
-                pointRadius: filtered.length < 30 ? 3 : 0,
-            }]
+            datasets: snapDatasets(filtered)
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', maxTicksLimit: 8 } },
-                y: { grid: { color: '#2a2a2a' }, ticks: { color: '#888', callback: v => '$' + v.toLocaleString() } }
-            }
+            interaction: NetworaCharts.INTERACTION,
+            plugins: {
+                legend: { display: false },
+                tooltip: NetworaCharts.moneyTooltip(displaySymbol, 2)
+            },
+            scales: NetworaCharts.moneyScales(displaySymbol)
         }
     });
+}
+
+/* Redraw from whatever is currently in snapData. Called by the range buttons and
+   by the out-of-band fragment the snapshot endpoints return, so the point markers
+   are re-sized for the new record count instead of going stale. */
+function updateAssetChart() {
+    if (!activeChart) return;
+    var filtered = filterSnapshots(currentRange);
+    activeChart.data.labels = filtered.map(s => s.snapshot_date);
+    activeChart.data.datasets = snapDatasets(filtered);
+    activeChart.update();
 }
 
 function filterSnapshots(range) {
@@ -763,10 +806,20 @@ function setRange(range, btn) {
     btn.classList.remove('btn-secondary');
     btn.classList.add('btn-primary');
     if (!activeChart) { initChart(range); return; }
-    var filtered = filterSnapshots(range);
-    activeChart.data.labels = filtered.map(s => s.snapshot_date);
-    activeChart.data.datasets[0].data = filtered.map(s => s.value_usd);
-    activeChart.update();
+    updateAssetChart();
+}
+
+/* Live preview of what a natively-entered amount becomes in USD, so the stored
+   figure is never a surprise. USD assets need no preview and have no hint node. */
+function updateSnapHint() {
+    var hint = document.getElementById('new-snap-hint');
+    var input = document.getElementById('new-snap-value');
+    if (!hint || !input) return;
+    var rate = 'at 1 ' + assetCurrency + ' = ' + assetUsdRate + ' USD';
+    var entered = parseFloat(input.value);
+    if (!isFinite(entered)) { hint.textContent = 'Converted to USD ' + rate; return; }
+    var usd = (entered * assetUsdRate).toLocaleString(undefined, {maximumFractionDigits: 2});
+    hint.textContent = '≈ $' + usd + ' USD ' + rate;
 }
 
 document.addEventListener('DOMContentLoaded', function() {
@@ -777,6 +830,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var d = document.getElementById('asset-cf-date');
     if (d && !d.value) d.value = new Date().toISOString().slice(0, 10);
+
+    var snapInput = document.getElementById('new-snap-value');
+    if (snapInput) snapInput.addEventListener('input', updateSnapHint);
+    updateSnapHint();
 });
 </script>
 {% endblock %}

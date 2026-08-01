@@ -68,6 +68,43 @@ async def stamp_prices_refreshed() -> None:
     )
 
 
+def _period_ref_date(period_key: str, today: date) -> str | None:
+    """The as-of date a period is measured *from*.
+
+    MTD, QTD and YTD are measured from the **close of the period before**, so
+    the reference is the day before the period starts. Anchoring them on the
+    first day instead swallowed everything recorded that day into the baseline:
+    a portfolio revalued on the 1st of the month reported 0.00% MTD, because the
+    new values were on both sides of the subtraction.
+
+    ``one_year`` is a rolling window and really does mean "the value on this
+    date last year", so it stays inclusive. ``all_time`` has no fixed date — it
+    needs a query for the first snapshot — and is left to the caller.
+    """
+    if period_key == "mtd":
+        start = date(today.year, today.month, 1)
+    elif period_key == "qtd":
+        start = date(today.year, ((today.month - 1) // 3) * 3 + 1, 1)
+    elif period_key == "ytd":
+        start = date(today.year, 1, 1)
+    elif period_key == "one_year":
+        try:
+            return today.replace(year=today.year - 1).isoformat()
+        except ValueError:  # 29 February
+            return (today - timedelta(days=365)).isoformat()
+    else:
+        return None
+    return (start - timedelta(days=1)).isoformat()
+
+
+async def _net_worth_at_period_start(db, period_key: str, today: date) -> float | None:
+    """Net worth at the reference date for ``period_key``, or None if unknowable."""
+    ref = _period_ref_date(period_key, today)
+    if ref is None:
+        return None
+    return await _get_net_worth_at_date(db, ref)
+
+
 async def _get_net_worth_at_date(db, ref_date: str) -> float | None:
     """Net worth as of a reference date: latest snapshot per active row up to
     that date, assets minus debts.
@@ -736,9 +773,9 @@ async def get_current_net_worth() -> dict:
         if (row["current_value_usd"] or 0) > 0
     }
 
-    # YTD change from snapshot as-of Jan 1
+    # YTD change, measured from last year's close (see _period_ref_date).
     today = date.today()  # noqa: DTZ011 - local calendar date
-    ytd_start = await _get_net_worth_at_date(db, f"{today.year}-01-01")
+    ytd_start = await _net_worth_at_period_start(db, "ytd", today)
     if ytd_start is not None:
         ytd_change = net_worth - ytd_start
         # Against a zero or negative base a ratio is meaningless and sign-flipped.
@@ -785,20 +822,10 @@ async def get_period_returns(nw_data: dict | None = None) -> dict:
             return (current - ref) / ref * 100
         return None
 
-    ytd_ref = await _get_net_worth_at_date(db, f"{today.year}-01-01")
-    mtd_ref = await _get_net_worth_at_date(
-        db, date(today.year, today.month, 1).isoformat()
-    )
-    qm = ((today.month - 1) // 3) * 3 + 1
-    qtd_ref = await _get_net_worth_at_date(db, date(today.year, qm, 1).isoformat())
-    try:
-        one_year_ref = await _get_net_worth_at_date(
-            db, today.replace(year=today.year - 1).isoformat()
-        )
-    except ValueError:
-        one_year_ref = await _get_net_worth_at_date(
-            db, (today - timedelta(days=365)).isoformat()
-        )
+    ytd_ref = await _net_worth_at_period_start(db, "ytd", today)
+    mtd_ref = await _net_worth_at_period_start(db, "mtd", today)
+    qtd_ref = await _net_worth_at_period_start(db, "qtd", today)
+    one_year_ref = await _net_worth_at_period_start(db, "one_year", today)
 
     # All-time: net worth at the very first snapshot date
     cursor = await db.execute("""
@@ -874,20 +901,13 @@ async def get_period_contributors(period_key: str) -> list[dict]:
     db = await get_db()
     today = date.today()  # noqa: DTZ011 - local calendar date
 
-    ref_date: str | None
-    if period_key == "ytd":
-        ref_date = f"{today.year}-01-01"
-    elif period_key == "mtd":
-        ref_date = date(today.year, today.month, 1).isoformat()
-    elif period_key == "qtd":
-        qm = ((today.month - 1) // 3) * 3 + 1
-        ref_date = date(today.year, qm, 1).isoformat()
-    elif period_key == "one_year":
-        try:
-            ref_date = today.replace(year=today.year - 1).isoformat()
-        except ValueError:
-            ref_date = (today - timedelta(days=365)).isoformat()
-    elif period_key == "all_time":
+    # Same reference dates as get_period_returns, so the contributor list sums to
+    # the percentage the card shows.
+    ref_date = _period_ref_date(period_key, today)
+    if ref_date is None:
+        # Only all_time has no calendar reference — anything else is an unknown key.
+        if period_key != "all_time":
+            return []
         cursor = await db.execute("""
             SELECT MIN(s.snapshot_date) FROM snapshots s
             JOIN assets a ON s.asset_id = a.id
@@ -895,8 +915,6 @@ async def get_period_contributors(period_key: str) -> list[dict]:
         """)
         row = await cursor.fetchone()
         ref_date = row[0] if row and row[0] else None
-    else:
-        return []
 
     if not ref_date:
         return []

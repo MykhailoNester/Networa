@@ -1,7 +1,7 @@
 export const meta = {
   name: 'ship-tasks',
   description: 'Deliver N Networa tasks as reviewed, gated, committed local branches — one isolated worktree each, removed on success',
-  whenToUse: 'Workflow mode for /ship. Use for larger batches where deterministic fan-out and resumability beat per-stage narration. Tasks must already be resolved into waves by Stage 0 of .claude/agents/dev-orchestrator.md.',
+  whenToUse: 'Workflow mode for /ship. Use for larger batches where deterministic fan-out beats per-stage narration. Not resumable — a died or partly-failed run is finished by hand, see .claude/agents/dev-orchestrator.md. Tasks must already be resolved into waves by Stage 0 of that same file.',
   phases: [
     { title: 'Setup', detail: 'worktree off base + venv symlink, one per task' },
     { title: 'Plan', detail: 'planner-agent, then plan-reviewer until APPROVED (max 2 revisions)' },
@@ -131,6 +131,9 @@ const PLAN_REVIEW_SCHEMA = {
       },
     },
     notes: { type: 'array', items: { type: 'string' } },
+    round: { type: 'integer' },
+    verified: { type: 'array', items: { type: 'string' }, description: 'citations resolved against the real code' },
+    closed_from_last_round: { type: 'array', items: { type: 'string' } },
     summary: { type: 'string' },
   },
 }
@@ -164,6 +167,7 @@ const REVIEW_SCHEMA = {
           severity: { type: 'string' },
           where: { type: 'string' },
           what: { type: 'string' },
+          reachability: { type: 'string', description: 'entry point -> call site -> the state that reaches it' },
           fix: { type: 'string' },
         },
       },
@@ -211,14 +215,24 @@ Run exactly this, and report what happened:
     git -C ${REPO} worktree add -b ${t.branch} ${wtOf(t)} ${t.base}
     ln -s ${REPO}/.venv ${wtOf(t)}/.venv
     git -C ${wtOf(t)} rev-parse --abbrev-ref HEAD
+    git -C ${wtOf(t)} status --porcelain
+
+The .venv symlink is what makes 'make check-all' runnable in the worktree, and
+data/demo.db is tracked, so the test suite works immediately with no further setup.
+
+That final 'git status --porcelain' must print EXACTLY one line:
+
+    ?? .venv
+
+'.venv/' in .gitignore is a directory-only pattern, so the symlink is untracked —
+expected, and the Finalize stage removes it before staging. Anything else in that
+output means the bootstrap went wrong: set ok:false and report it verbatim.
 
 Hard stops — set ok:false with the reason, and create nothing:
 - ${t.branch} already exists (check first: git -C ${REPO} rev-parse --verify ${t.branch}).
   Never clobber an existing branch.
 - ${REPO}/.venv does not exist.
-- HEAD in the new worktree is not ${t.branch}.
-
-The .venv symlink is what makes 'make check-all' runnable in the worktree.`,
+- HEAD in the new worktree is not ${t.branch}.`,
     { label: `setup:${t.slug}`, phase: 'Setup', schema: SETUP_SCHEMA, agentType: 'general-purpose', effort: 'low' },
   )
 
@@ -319,8 +333,9 @@ ${envFor(t)}${RULES}
 Rules for this stage:
 - Every path you touch is absolute under ${wtOf(t)}. Never edit anything under ${REPO}.
 - Do NOT commit, and do not stage anything. A later stage owns the commit.
-- Do NOT run 'make format' or 'ruff format' — the gate checks formatting and the reviewer
-  needs to see what you actually wrote.
+- Run 'ruff format' on the files you touched, naming them explicitly — formatting is gated,
+  and a whole gate round spent on it is waste. NEVER 'ruff format .' or 'make format':
+  reformatting files this task did not touch buries the diff the reviewer has to read.
 - Do not delete ${wtOf(t)}/.venv.
 - Write the tests the plan commits to. A fix ships with a test.
 - If the plan turns out to be wrong once the code is in front of you, diverge deliberately and
@@ -355,8 +370,12 @@ the full review to ${artOf(t)}/review-${round}.md.
 
 In the structured payload, put in 'blockers' ONLY: every 🔴, plus any 🟡 that names a missing
 test or a layering violation. Leave 🟢 out entirely — style does not hold up this pipeline.
-Check the debt-sign convention and the manual-escaping rule explicitly; they are this repo's
-two most likely silent defects.`,
+Give each blocker a 'reachability': the entry point, the call site and the state that reaches
+it. A finding you cannot reach is a note, not a blocker.
+Check these explicitly; they are this repo's most likely silent defects: a net-worth aggregate
+that forgot to sign debt rows -1, a composition aggregate accidentally denominated by net worth
+instead of gross assets, an interpolated value in router-built HTML that skipped app.html.e(),
+and a new column added to app/schema.sql where an existing database needs a migration step.`,
       { label: `review:${t.slug}:r${round}`, phase: 'Review', schema: REVIEW_SCHEMA, agentType: 'code-reviewer' },
     )
 
@@ -369,7 +388,9 @@ two most likely silent defects.`,
     if (round > MAX_REVIEW_FIXES) break
 
     log(`${t.slug}: review fix round ${round} — ${blockers.length} blocker(s)`)
-    const list = blockers.map(b => `${b.id} [${b.severity || 'BLOCKER'}] ${b.where} — ${b.what}\n   fix: ${b.fix}`).join('\n')
+    const list = blockers
+      .map(b => `${b.id} [${b.severity || 'BLOCKER'}] ${b.where} — ${b.what}${b.reachability ? `\n   reachable via: ${b.reachability}` : ''}\n   fix: ${b.fix}`)
+      .join('\n')
 
     const fix = await agent(
       `Fix the review findings on this branch. Do not refactor beyond them.
@@ -379,7 +400,7 @@ ${envFor(t)}${RULES}
 ${list}
 
 Fix each one. If a finding is wrong, say so in divergence_reason instead of changing code you
-believe is correct. Do not commit. Do not run 'make format'.`,
+believe is correct. Do not commit. Do not run a repo-wide formatter.`,
       { label: `review-fix:${t.slug}:r${round}`, phase: 'Review', schema: IMPL_SCHEMA, agentType: 'coder-agent' },
     )
     if (!fix || !fix.ok) {
@@ -467,16 +488,24 @@ async function finalize(prev, t) {
 ${envFor(t)}
 
 STEP 1 — write the commit message to ${artOf(t)}/commit-msg.txt.
-Follow .claude/commands/commit-message.md and these rules exactly:
-- Header: ${type}(<scope>): <summary>. The type is ${type}, from the branch prefix. Scope is one
-  lowercase area (dashboard, assets, debts, cashflows, snapshots, sheets, import, exchange-rates,
-  settings, schema, currency, security, templates, tests, ci, docs, deps) — omit it when the
-  change spans several.
-- Summary: imperative, lowercase, UNDER 50 CHARACTERS, no trailing period.
-- Then a blank line, then a body wrapped at 72 characters saying WHAT and WHY, never HOW.
-  Short bullets are fine.
-- NO 'Co-Authored-By' trailer. This project does not use them.
-Base it on 'git -C ${wtOf(t)} diff ${t.base}...HEAD' plus the uncommitted work, and on
+
+FIRST, read ${wtOf(t)}/.claude/commands/commit-message.md in full. That file is this repo's
+commit-message specification and the only authority on style — do not work from your own idea
+of a good commit message, and do not work from a summary of that file. Follow it exactly: its
+type table, its scope list, its summary rule, its bullet rule and its output rules. The type
+here is ${type}, from the branch prefix.
+
+Match its worked examples for LENGTH, not just for shape — they are one line, or one line plus
+two or three bullets. A commit message is not a design document: the plan, the reviews and the
+gate results are already archived under ${artOf(t)} for anyone who wants the full account.
+Prefer the one or two decisions a reader in six months could not reconstruct from the diff over
+a complete narration of the change.
+
+Two deltas from that file, which describes the interactive command rather than this stage:
+- Write the message to ${artOf(t)}/commit-msg.txt instead of printing it.
+- It says committing is the user's call; this pipeline is the exception, and STEP 2 is it.
+
+Base the message on 'git -C ${wtOf(t)} diff ${t.base}...HEAD' plus the uncommitted work, and on
 ${artOf(t)}/plan.md for the why.
 
 STEP 2 — commit, in this exact order. The order matters:
@@ -568,6 +597,9 @@ return {
       commitSubject: r.final ? r.final.commit_subject : null,
       worktreeRemoved: r.final ? r.final.worktree_removed === true : false,
       worktreePreserved: r.failed && !r.skipped ? wtOf(t) : null,
+      /* Teardown refused => the commit landed but the worktree is dirty. The protocol
+         promises to report what is still uncommitted, so don't drop it. */
+      finalizePartial: r.stage === 'Finalize' ? r.partial || null : null,
       artifacts: t.slug ? artOf(t) : null,
       rounds: { plan: r.planRounds || null, review: r.reviewRounds || null, gate: r.gateRounds || null },
       planSummary: r.plan ? r.plan.summary : null,

@@ -77,21 +77,31 @@ def test_snapshot_json_cannot_escape_its_script_block(client, hostile_asset):
     client.post(f"/assets/{hostile_asset}/inline-save", data={"value": "100"})
     client.post(
         f"/assets/{hostile_asset}/snapshots/add",
-        data={"snapshot_date": "2026-01-02", "value_usd": "120"},
+        data={"snapshot_date": "2026-01-02", "value": "120"},
     )
     body = client.post(
         f"/assets/{hostile_asset}/snapshots/add",
-        data={"snapshot_date": "2026-01-03", "value_usd": "130"},
+        data={"snapshot_date": "2026-01-03", "value": "130"},
     ).text
     assert "snapData=" in body
     assert SCRIPT_PAYLOAD not in body
+
+
+def test_the_detail_pages_script_block_cannot_be_broken_out_of(client, hostile_asset):
+    """The VALUE tab hands the asset's currency to JavaScript for the conversion
+    preview, so that currency is interpolated into a <script> block."""
+    body = client.get(f"/assets/{hostile_asset}?tab=value").text
+
+    assert "var assetCurrency" in body
+    assert SCRIPT_PAYLOAD not in body
+    assert "\\u003c" in body
 
 
 def test_snapshot_date_is_escaped(client, hostile_asset):
     """snapshot_date is free-form text, not a validated date."""
     body = client.post(
         f"/assets/{hostile_asset}/snapshots/add",
-        data={"snapshot_date": "<b>pwn</b>", "value_usd": "5"},
+        data={"snapshot_date": "<b>pwn</b>", "value": "5"},
     ).text
     assert "<b>pwn</b>" not in body
     assert "&lt;b&gt;pwn" in body
@@ -120,7 +130,7 @@ def test_foreign_origin_is_rejected(client, hostile_asset):
 def test_same_origin_post_is_allowed(client, hostile_asset):
     response = client.post(
         f"/assets/{hostile_asset}/snapshots/add",
-        data={"snapshot_date": "2026-02-02", "value_usd": "9"},
+        data={"snapshot_date": "2026-02-02", "value": "9"},
         headers={"Sec-Fetch-Site": "same-origin"},
     )
     assert response.status_code == 200
