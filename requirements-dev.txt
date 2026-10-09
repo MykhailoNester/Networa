@@ -1,5 +1,5 @@
 # Development / CI tools (not needed to run the app).
 # Install with:  pip install -r requirements-dev.txt
 ruff==0.16.0
-mypy==2.3.0
+mypy==2.4.0
 pytest==9.1.1
