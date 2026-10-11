@@ -7,14 +7,17 @@ Self-hosted personal net-worth and asset tracker for monitoring assets, debts, c
 - **Backend:** Python 3.12+, FastAPI, aiosqlite (async SQLite)
 - **Frontend:** Jinja2 templates, HTMX, Chart.js, custom dark-theme CSS
 - **Database:** SQLite with WAL mode. Default `data/networa.db` (gitignored, created and sample-seeded on first run). `data/demo.db` is the committed screenshot dataset — never put real data in it. Override with `DB_NAME` | `DATABASE_PATH`.
+- **Env vars** (`app/config.py`, all optional): `DB_NAME`, `DATABASE_PATH`, `SEED_SAMPLE_DATA` (`0` = start empty), `HOST` (default `127.0.0.1`), `PORT` (`8000`), `ALLOWED_HOSTS`. Documented in `.env.example`.
 - **Deployment:** Docker / Docker Compose
 
 ## Development
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv .venv && source .venv/bin/activate   # needs 3.12+; macOS's stock python3 is 3.9
+make install-dev        # requirements.txt + pinned requirements-dev.txt (ruff, mypy, pytest)
 python main.py          # runs on http://localhost:8000 with hot reload
+make check-all          # ruff format --check + ruff check + mypy app/ + pytest — same gate as CI
+make seed-demo          # rebuild data/demo.db
 ```
 
 ## Docker
@@ -38,13 +41,17 @@ app/
   forms.py              # typed form-field helpers
   html.py               # escaping helpers for router-built HTML fragments
   security.py           # same-origin + Host enforcement middleware
-  routers/              # route handlers (dashboard, assets, debts, cashflows, snapshots, exchange_rates,
-                        #   sheets, import_data, settings)
+  scheduler.py          # opt-in daily auto-valuation loop (plain asyncio task, started from lifespan)
+  routers/              # route handlers (dashboard, assets, debts, cashflows, snapshots, prices,
+                        #   exchange_rates, sheets, import_data, settings)
                         # CSV import format documented in docs/import-format.md
   services/             # business logic (asset_service, snapshot_service, currency_service, import_service,
                         #   cashflow_service, market_service, settings_service,
                         #   sample_data — first-run seeding of an empty DB)
-templates/              # Jinja2 HTML templates
+  static/               # css/style.css, js/charts.js, vendor/ (htmx, Chart.js, fonts)
+templates/              # Jinja2 HTML templates (+ partials/ for HTMX fragments)
+tests/                  # pytest suite
+docs/                   # import-format.md, auto-valuation.md, media/
 scripts/
   seed_demo.py          # (re)build the synthetic data/demo.db
   backup.sh             # WAL-safe SQLite backup with retention
@@ -72,6 +79,7 @@ data/                   # SQLite databases: networa.db (default, gitignored) + d
   sends USD.
 - Schema is initialized automatically from the single `app/schema.sql` on first run (idempotent; there is no migrations directory). Note this cannot add a column to an existing table — adding one needs a real migration step.
 - SQLite pragmas applied at startup: `PRAGMA journal_mode=WAL`, `PRAGMA foreign_keys=ON`.
+- **Auto-valuation** reprices ticker-bearing assets (`category = 'asset'` only — debts are never market-priced) via a manual button, `POST /api/v1/prices/refresh`, `POST /api/v1/valuation/daily-run`, or the opt-in daily `app/scheduler.py` loop (toggled in Settings, off by default). All paths go through `snapshot_service`. See `docs/auto-valuation.md`.
 - 9 asset classes are pre-seeded (stocks, real estate, crypto, etc.).
 
 ## Database Backup
@@ -82,3 +90,7 @@ data/                   # SQLite databases: networa.db (default, gitignored) + d
 ```
 
 Safe to run while the app is running (WAL mode).
+
+## Agent Pipeline
+
+`.claude/` holds an autonomous delivery pipeline: `/ship <tasks>` runs `.claude/agents/dev-orchestrator.md` (planner-agent → plan-reviewer → coder-agent → code-reviewer → compiler-agent), one worktree and local branch per task off `develop`, no push or PR. `workflow` mode uses `.claude/workflows/ship-tasks.js`. Settings come from `.claude/pipeline.env` (gitignored; copy `pipeline.env.example`).
